@@ -1,8 +1,8 @@
 # WHA AI Master Plan POC
 
-**Client:** WHA Corporation (WHA Group), Thailand
-**Domain:** Industrial Estate Development  Land Subdivision & Master Planning
-**Regulator:** IEAT  Industrial Estate Authority of Thailand, Regulations B.E. 2555 (2012)
+**Client:** WHA Corporation (WHA Group), Thailand  
+**Domain:** Industrial Estate Development — Land Subdivision & Master Planning  
+**Regulator:** IEAT — Industrial Estate Authority of Thailand, Regulations B.E. 2555 (2012)  
 **Sites:** WHA RY36 (Rayong), WHA GVTP, WHA IER
 
 An AI-powered industrial master plan generator. Upload a site boundary DWG to get a structured layout analysis and WHA-style master plan image, respecting IEAT regulations and WHA product standards.
@@ -14,55 +14,53 @@ An AI-powered industrial master plan generator. Upload a site boundary DWG to ge
 ## How It Works
 
 ```
-DWG / PNG upload  (>=2000x2000 px, pink boundary, blue roads, brown contours)
+DWG / PNG upload  (pink boundary, blue roads, brown contours)
       |
       v
-dwg_utils.py  --  ConvertAPI (DWG -> georeferenced PNG)
+dwg_utils.py  --  ConvertAPI (DWG -> PNG)
       |
       v  PIL Image
-+----------------------------------------------------------------------+
-|  Three-Tier Constraint Hierarchy  (evaluated before any layout)      |
-|                                                                      |
-|  PRIORITY 1 -- BOUNDARY INTEGRITY  (Absolute / Non-Negotiable)       |
-|    Every road, plot, and utility must lie 100% within pink boundary  |
-|    Pink polygon treated as hard mask -- not a soft guideline         |
-|                                                                      |
-|  PRIORITY 2 -- ROAD SKELETON  (Fixed before any plot is drawn)       |
-|    Primary 30m spine -> Secondary 16m grid -> Block definition       |
-|    IEAT Clause 6.1 (30m primary), Clause 6.3 (16m secondary)        |
-|                                                                      |
-|  PRIORITY 3 -- PLOT SUBDIVISION MATRIX  (Derived from roads)         |
-|    J-series: 8,000-14,000 sqm, 1:1-1:3 aspect ratio                |
-|    A-series: edge plots follow boundary; C-series: mega-blocks       |
-+----------------------------------------------------------------------+
++------------------------------------------------------------+
+|  Three-Tier Constraint Hierarchy                           |
+|                                                            |
+|  PRIORITY 1 -- BOUNDARY INTEGRITY (Non-Negotiable)        |
+|    All roads/plots must lie 100% within pink boundary     |
+|    Pink polygon = hard mask, not a soft guideline          |
+|                                                            |
+|  PRIORITY 2 -- ROAD SKELETON (Before any plot is drawn)   |
+|    30m spine -> 16m grid -> block definition               |
+|    IEAT Clause 6.1 (primary 30m), 6.3 (secondary 16m)    |
+|                                                            |
+|  PRIORITY 3 -- PLOT SUBDIVISION MATRIX (From roads)       |
+|    J-series: 8,000-14,000 sqm, aspect 1:1-1:3             |
+|    A-series: edge plots; C-series: mega-blocks             |
++------------------------------------------------------------+
       |
       v
-+----------------------------------------------------------------------+
-|  WhaAISession  (ai_client.py) -- Three-Phase Processing Pipeline     |
-|                                                                      |
-|  Phase A -- LAYOUT DRAFTING  [phase1_understand()]                   |
-|    Model: Qwen2.5-VL-7B-Instruct (LOCAL, transformers)               |
-|    Input: DWG topo + WHA reference plans                             |
-|    Output: Boundary cartography, topographic basin nominations,      |
-|            road skeleton, draft plot subdivision matrix,             |
-|            site parameter set for constraint engine                  |
-|                                                                      |
-|  Phase B -- CONSTRAINT OPTIMISATION  [phase2_generate()]             |
-|    Model: Qwen-Image-Edit-2511 (LOCAL, diffusers)                    |
-|    Pink boundary preprocessor: 35px hard boundary enforcement        |
-|    Gravity-first utility placement (ponds -> WWTP -> substation)     |
-|    Target: saleable area >= 70%, green buffer >= 5%                  |
-|    Output: Verified master plan PIL image in WHA visual style        |
-|    Note: Currently AI-simulated; dedicated optimisation solver TBD   |
-|                                                                      |
-|  Phase C -- REGULATORY VERIFICATION  [edit() / review loop]          |
-|    Clause-by-clause IEAT B.E. 2555 compliance check                  |
-|    Road widths, pond sizing, WWTP setbacks, fire hydrant spacing     |
-|    Note: Currently AI-reasoned; programmatic rule engine TBD         |
-|                                                                      |
-|  Edit loop -- iterative refinement                                   |
-|    Re-calls local pipeline with last image + instruction             |
-+----------------------------------------------------------------------+
++------------------------------------------------------------+
+|  WhaAISession (ai_client.py) -- Three-Phase Pipeline      |
+|                                                            |
+|  Phase A -- LAYOUT DRAFTING  [phase1_understand()]        |
+|    Qwen2.5-VL-7B-Instruct  (LOCAL, transformers)          |
+|    Input:  DWG topo + WHA reference plans                  |
+|    Output: boundary cartography, basin nominations,        |
+|            road skeleton, plot matrix, site params         |
+|                                                            |
+|  Phase B -- CONSTRAINT OPTIMISATION [phase2_generate()]   |
+|    Qwen-Image-Edit-2511  (LOCAL, diffusers)                |
+|    Pink boundary preprocessor: 35px enforcement           |
+|    Gravity-first: ponds -> WWTP -> substation              |
+|    Target: saleable >=70%, green buffer >=5%               |
+|    Note: AI-simulated; constraint solver TBD               |
+|                                                            |
+|  Phase C -- REGULATORY VERIFICATION [edit() / review]     |
+|    IEAT B.E. 2555 clause-by-clause compliance check        |
+|    Road widths, pond sizing, WWTP setbacks, hydrants       |
+|    Note: AI-reasoned; programmatic rule engine TBD         |
+|                                                            |
+|  Edit loop -- iterative refinement                         |
+|    Re-calls pipeline with last image + instruction         |
++------------------------------------------------------------+
 ```
 
 ---
