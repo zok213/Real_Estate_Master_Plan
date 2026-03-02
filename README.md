@@ -13,7 +13,7 @@ An AI-powered industrial master plan generator. Upload a site boundary DWG to ge
 
 ## How It Works
 
-`
+```
 DWG / PNG upload  (>=2000x2000 px, pink boundary, blue roads, brown contours)
       |
       v
@@ -63,7 +63,7 @@ dwg_utils.py  --  ConvertAPI (DWG -> georeferenced PNG)
 |  Edit loop -- iterative refinement                                   |
 |    Re-calls local pipeline with last image + instruction             |
 +----------------------------------------------------------------------+
-`
+```
 
 ---
 
@@ -95,7 +95,7 @@ dwg_utils.py  --  ConvertAPI (DWG -> georeferenced PNG)
 
 ## Project Structure
 
-`
+```
 WHA_AI_MasterPlan_POC/
 +-- src/
 |   +-- app.py            # Streamlit UI (port 8512)
@@ -115,7 +115,7 @@ WHA_AI_MasterPlan_POC/
 +-- ARCHITECTURE.md       # Pipeline deep-dive, IEAT compliance status
 +-- requirements.txt
 +-- .gitignore
-`
+```
 
 ---
 
@@ -123,24 +123,30 @@ WHA_AI_MasterPlan_POC/
 
 ### 1. Clone with submodules
 
-`ash
+```bash
 git clone --recurse-submodules https://github.com/zok213/RealEstate
 cd RealEstate
-`
+```
 
 ### 2. Install dependencies
 
-`ash
+```bash
 pip install -r requirements.txt
-`
+```
 
 Phase B local inference requires PyTorch + CUDA.
-Default requirements.txt installs CPU-only torch.
-For GPU (recommended -- RTX 3090 / A100, ~20 GB VRAM):
+Default `requirements.txt` installs CPU-only torch.
 
-`ash
+**GPU requirements:**
+
+| Tier | Hardware | VRAM | Notes |
+|---|---|---|---|
+| Minimum | 1x RTX 4090 | 24 GB | Phase A + Phase B, slower generation (~10-15 min/image) |
+| Recommended (full flow) | 2x RTX 4090 | 48 GB total | Full pipeline, parallel Phase A+B, production speed |
+
+```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu124
-`
+```
 
 First run downloads Qwen-Image-Edit-2511 weights (~16 GB) automatically.
 
@@ -157,9 +163,9 @@ In src/config.py or as environment variables:
 
 ### 4. Run
 
-`ash
+```bash
 streamlit run src/app.py --server.port 8512
-`
+```
 
 ---
 
