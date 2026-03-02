@@ -1,0 +1,106 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ─── Virtual environments ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env/
+.venv*/
+
+# ─── Environment / secrets ────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+*_key*
+secrets.py
+credentials.json
+
+# ─── IDE / editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── OS ───────────────────────────────────────────────────────────────────────
+[Tt]humbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── ML model weights (large binary files) ───────────────────────────────────
+*.safetensors
+*.gguf
+*.ggml
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.h5
+*.hdf5
+models/
+model_cache/
+huggingface_cache/
+hf_cache/
+# HuggingFace local hub cache
+~/.cache/huggingface/
+
+# ─── Generated outputs ────────────────────────────────────────────────────────
+output/*
+!output/.gitkeep
+
+# ─── Customer / private drawings ─────────────────────────────────────────────
+*.dwg
+*.dxf
+customer docs/
+
+# ─── ComfyUI runtime artifacts ───────────────────────────────────────────────
+third_party/ComfyUI/models/
+third_party/ComfyUI/input/
+third_party/ComfyUI/output/
+third_party/ComfyUI/temp/
+third_party/ComfyUI/user/
+third_party/ComfyUI/custom_nodes/*/node_modules/
+
+# ─── LocalAI runtime artifacts ───────────────────────────────────────────────
+third_party/LocalAI/models/
+third_party/LocalAI/build/
+
+# ─── diffusers build artifacts ───────────────────────────────────────────────
+third_party/diffusers/dist/
+third_party/diffusers/build/
+third_party/diffusers/.tox/
+
+# ─── Docker / containers ─────────────────────────────────────────────────────
+docker/*.env
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+*.out
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.orig
+*.metadata.json
+*.resolved
+*.resolved.*

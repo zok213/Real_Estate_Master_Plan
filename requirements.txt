@@ -1,0 +1,40 @@
+# WHA Auto Design AI — Python dependencies
+# Install: pip install -r requirements.txt
+#
+# IMPORTANT — Phase 2 local inference (Qwen-Image-Edit-2511):
+#   GPU recommended (NVIDIA CUDA 12+).  CPU works but is very slow.
+#   On GPU, first run downloads ~16 GB model weights to
+#   ~/.cache/huggingface/hub (automatic, one-time).
+#
+#   For CUDA installs visit: https://pytorch.org/get-started/locally/
+#   Example CUDA 12.4:
+#     pip install torch --index-url https://download.pytorch.org/whl/cu124
+#   The torch line below installs CPU-only as a safe default.
+
+# ── Web UI ────────────────────────────────────────────────────────────────────
+streamlit>=1.35.0
+
+# ── AI / API clients ──────────────────────────────────────────────────────────
+# OpenAI-compatible SDK (used for Phase 1 OpenRouter calls)
+openai>=1.30.0
+
+# ── Phase 2 local inference (Qwen-Image-Edit-2511 via diffusers) ─────────────
+# PyTorch — install CUDA build separately for GPU acceleration (see above)
+torch>=2.0.0
+# HuggingFace diffusers — must be latest git for QwenImageEditPlusPipeline
+diffusers @ git+https://github.com/huggingface/diffusers
+# Required by diffusers / Qwen-Image
+transformers>=4.51.3
+accelerate>=0.30.0
+sentencepiece>=0.1.99
+
+# ── Image processing ──────────────────────────────────────────────────────────
+Pillow>=10.0.0
+numpy>=1.26.0
+scipy>=1.11.0
+
+# ── DWG conversion ────────────────────────────────────────────────────────────
+convertapi>=1.4.0
+
+# ── CAD parsing (optional — for DXF layer inspection) ────────────────────────
+ezdxf>=1.1.0

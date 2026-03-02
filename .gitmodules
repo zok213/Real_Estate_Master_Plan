@@ -1,0 +1,12 @@
+[submodule "third_party/Qwen-Image"]
+	path = third_party/Qwen-Image
+	url = https://github.com/QwenLM/Qwen-Image
+[submodule "third_party/ComfyUI"]
+	path = third_party/ComfyUI
+	url = https://github.com/Comfy-Org/ComfyUI
+[submodule "third_party/diffusers"]
+	path = third_party/diffusers
+	url = https://github.com/huggingface/diffusers
+[submodule "third_party/LocalAI"]
+	path = third_party/LocalAI
+	url = https://github.com/mudler/LocalAI
