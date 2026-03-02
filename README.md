@@ -1,74 +1,139 @@
-# WHA AI Master Plan POC (Implementation)
+# WHA AI Master Plan POC
 
-This repository contains the **production-ready source code** for the WHA AI Master Plan Proof of Concept. The system uses a **Custom Python Wrapper** to orchestrate data flow between WHA's AutoCAD files and the **TestFit** AI engine.
+An AI-powered industrial master plan generator for WHA industrial estates.  
+Upload a site boundary DWG → get a fully-labelled master plan image in WHA visual style.
 
-## 📂 Project Structure
+**Live demo:** `streamlit run src/app.py` → http://localhost:8512
+
+---
+
+## How It Works
 
 ```
-d:\newrealestate\WHA_AI_MasterPlan_POC\
-├── docs/                # Project Documentation (The 10-Document Package)
-├── src/                 # Source Code
-│   ├── adapters/        # Input/Output Handlers (DWG <-> TestFit)
-│   ├── logic/           # Core Logic & Validators
-│   ├── models.py        # Pydantic Data Models (Type Safety)
-│   ├── main.py          # CLI Entry Point
-│   ├── testfit_client.py# File Watcher Integration
-│   ├── output_processor.py # Layer Remapping
-│   └── inspect_layers.py # Helper Tool
-├── input/               # Drop your input .dwg files here
-├── output/              # Generated results appear here
-└── requirements.txt     # Python Dependencies
+DWG file upload
+      │
+      ▼
+dwg_utils.py  ──  ConvertAPI (cloud DWG→PNG)
+      │
+      ▼  PIL Image
+┌─────────────────────────────────────────────────┐
+│  WhaAISession  (ai_client.py)                   │
+│                                                  │
+│  Phase 1 — Site Understanding                   │
+│    Qwen2.5-VL-72B via OpenRouter (free tier)    │
+│    Reads reference plans + topo examples        │
+│    → concise site facts (entry, basins)         │
+│                                                  │
+│  Phase 2 — Plan Generation                      │
+│    Qwen-Image-Edit-2511 (LOCAL, diffusers)      │
+│    Pink boundary preprocessor enforces edge     │
+│    7 few-shot WHA style references injected     │
+│    → master plan PIL image                      │
+│                                                  │
+│  Edit loop — iterative refinement               │
+│    Re-calls local pipeline with last image      │
+└─────────────────────────────────────────────────┘
 ```
 
-## 📂 Client Data References
+---
 
-The project validates against real client data located in `d:\newrealestate\client doument`.
+## Project Structure
 
-- **Primary Input:** `WHA RY36_Master Plan_Original (1).dwg`
+```
+WHA_AI_MasterPlan_POC/
+├── src/
+│   ├── app.py            # Streamlit UI (port 8512)
+│   ├── ai_client.py      # Two-phase AI pipeline
+│   ├── config.py         # API keys, model names, paths
+│   ├── prompts.py        # System + generation prompts
+│   └── dwg_utils.py      # DWG → PNG via ConvertAPI
+├── lora/                 # WHA visual style references (9 images)
+│   ├── 1.png … 5.png     # Broader style library
+│   └── target1-3.png     # Closest output-style examples
+├── output/               # Generated master plans saved here
+├── tools/
+│   └── autocad_converter.py  # Local AutoCAD COM automation (DWG→DXF)
+├── third_party/          # Git submodules
+│   ├── Qwen-Image/       # QwenLM model cards + LoRA training guide
+│   ├── ComfyUI/          # Alternative Phase 2 backend (ControlNet)
+│   ├── diffusers/        # HF diffusers source (QwenImageEditPlusPipeline)
+│   └── LocalAI/          # Local OpenAI-compatible server reference
+├── docs/                 # Project documentation
+├── ARCHITECTURE.md       # AI engineering deep-dive analysis
+├── requirements.txt
+└── .gitignore
+```
 
-## 🚀 How to Run
+---
 
-### 1. Setup
+## Setup
+
+### 1. Clone with submodules
 
 ```bash
-python -m venv venv
-./venv/Scripts/activate
+git clone --recurse-submodules https://github.com/zok213/RealEstate
+cd RealEstate
+```
+
+### 2. Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-## 🚀 User Guide (Verified Workflow)
+> **Phase 2 local inference requires PyTorch + CUDA.**  
+> The default `requirements.txt` installs CPU-only torch.  
+> For GPU (recommended — RTX 3090 / A100, ~20 GB VRAM):
+> ```bash
+> pip install torch --index-url https://download.pytorch.org/whl/cu124
+> ```
+> First run downloads Qwen-Image-Edit-2511 weights (~16 GB) automatically.
 
-**Prerequisite:** Convert your `.dwg` input to `.dxf` (AutoCAD 2018 format) to ensure maximum compatibility without external binary dependencies.
+### 3. Set API keys
 
-### 1. Run the Pipeline (Production Mode)
+In `src/config.py` or as environment variables:
 
-```bash
-# Process a real site using the OR-Tools engine
-python -m src.main "path/to/your_site.dxf" ortools
-```
+| Variable | Purpose | Required |
+|---|---|---|
+| `OPENROUTER_API_KEY` | Phase 1 VLM (Qwen2.5-VL-72B, free tier) | Yes |
+| `CONVERTAPI_SECRET` | DWG → PNG cloud conversion | Yes |
+| `LOCAL_INFERENCE_DEVICE` | `"auto"` / `"cuda"` / `"cpu"` | Optional |
+| `HF_HOME` | Override HuggingFace model cache path | Optional |
 
-### 2. Output
-
-* **Design:** `output/ry36_v2_result.dxf` (Open in AutoCAD)
-- **Report:** `output/ry36_v2_result.json` (Metrics & Compliance)
-
-### 3. Troubleshooting
-
-If you see `ODA File Converter not found`:
-
-1. **Option A:** Install [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter).
-2. **Option B (Recommended):** Manually save your DWG as DXF before running.
-
-### 4. Run TestFit Watcher (Real Integration)
-
-Starts the background service that listens for TestFit exports.
+### 4. Run
 
 ```bash
-python src/testfit_client.py
+streamlit run src/app.py --server.port 8512
 ```
 
-## 📜 Documentation Index
+---
 
+## Models Used
+
+| Phase | Model | Where |
+|---|---|---|
+| Phase 1 VLM | `qwen/qwen2.5-vl-72b-instruct:free` | OpenRouter (cloud, free) |
+| Phase 2 Image Gen | `Qwen/Qwen-Image-Edit-2511` | Local via `diffusers` |
+
+Phase 2 falls back to a demo image (`lora/2 copy.png`) automatically if torch is not installed or GPU is out of memory.
+
+---
+
+## What Was Built
+
+- **Full project cleanup** — removed TestFit adapters, OR-Tools engine, Pydantic models, and all dead code from the original scaffold
+- **Gemini API fully removed** — replaced with Qwen-only pipeline (OpenAI SDK throughout, no Google SDK)
+- **Local inference** — Phase 2 migrated from HuggingFace cloud Inference API to local `QwenImageEditPlusPipeline` (no API token, no rate limits, no data leaves the machine)
+- **Pink boundary preprocessor** — 35 px bold boundary enforcement, interior cream fill, blue road neutralisation
+- **7-image few-shot system** — WHA style references injected at 1280px quality-95 JPEG
+- **Streamlit UI** — upload DWG, run Phase 1 silently, generate plan, iterative edit loop, remove site map button
+- **Git setup** — repo at `https://github.com/zok213/RealEstate`, 4 submodules, comprehensive `.gitignore`
+
+---
+
+## Documentation
+
+- [Architecture Analysis](ARCHITECTURE.md) — honest AI engineering assessment, scoring, improvement roadmap
 - [Executive Summary](docs/01_Executive_Summary.md)
 - [Technical Architecture](docs/02_Technical_Architecture.md)
 - [Implementation Guide](docs/03_Implementation_Guide_2Weeks.md)
