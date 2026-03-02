@@ -1,207 +1,262 @@
-# WHA AI Master Plan POC — Architecture Analysis
-> Deep engineering assessment: what works, what doesn't, how to improve.
+# WHA AI Master Plan POC -- Architecture Analysis
+
+> Engineering assessment aligned with Standard Operating Procedure v1.0 (March 2026).
+> Client: WHA Corporation | Regulator: IEAT B.E. 2555 | Sites: WHA RY36, GVTP, IER
 
 ---
 
 ## System Overview
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│   User (browser)  ←→  Streamlit (port 8512)                     │
-│                                                                   │
-│   ┌─────────────────┐        ┌──────────────────────────────┐   │
-│   │ DWG upload      │──PNG──▶│ dwg_utils.py (ConvertAPI)    │   │
-│   └─────────────────┘        └──────────────┬───────────────┘   │
-│                                              │ PIL Image          │
-│   ┌─────────────────────────────────────────▼───────────────┐   │
-│   │ WhaAISession  (ai_client.py)                             │   │
-│   │                                                           │   │
-│   │  Phase 1 ── phase1_understand()                          │   │
-│   │    ├─ Load reference plans + target examples (lora/)     │   │
-│   │    ├─ Encode to base64 data-URLs                         │   │
-│   │    └─ OpenRouter → Qwen2.5-VL-72B (free) → site facts   │   │
-│   │                                                           │   │
-│   │  Phase 2 ── phase2_generate()                            │   │
-│   │    ├─ _preprocess_topo_for_gen() (pink boundary enforce) │   │
-│   │    ├─ Load WHA style references                          │   │
-│   │    └─ diffusers QwenImageEditPlusPipeline (LOCAL)        │   │
-│   │         → master plan PIL image                          │   │
-│   │                                                           │   │
-│   │  Edit ── edit()                                          │   │
-│   │    └─ QwenImageEditPlusPipeline(last_image, instruction) │   │
-│   └──────────────────────────────────────────────────────────┘   │
-│                                                                   │
-│   third_party/                                                    │
-│     Qwen-Image/   ← reference code + examples                    │
-│     ComfyUI/      ← alternative Phase 2 backend (future)         │
-│     diffusers/    ← source of QwenImageEditPlusPipeline          │
-│     LocalAI/      ← alternative local API server (future)        │
-└─────────────────────────────────────────────────────────────────┘
-```
+`
++-------------------------------------------------------------------+
+|   User (browser)  <->  Streamlit (port 8512)                      |
+|                                                                   |
+|   +-------------------+     +-------------------------------+    |
+|   | DWG / PNG upload  |---->| dwg_utils.py  (ConvertAPI)    |    |
+|   +-------------------+     +---------------+---------------+    |
+|                                             | PIL Image           |
+|   +-----------------------------------------v-----------------+  |
+|   | Three-Tier Constraint Hierarchy                            |  |
+|   |                                                             |  |
+|   |  PRIORITY 1 -- BOUNDARY INTEGRITY  (Non-Negotiable)        |  |
+|   |    Pink polygon = hard mask. 100% containment enforced.    |  |
+|   |    Violations: legal title non-compliance, IEAT rejection  |  |
+|   |                                                             |  |
+|   |  PRIORITY 2 -- ROAD SKELETON  (Before any plot is drawn)   |  |
+|   |    Step 1: 30m primary spine from blue road inward         |  |
+|   |    Step 2: 16m secondary grid -> 300-400m block definition  |  |
+|   |    Step 3: ONLY THEN subdivide blocks into plots            |  |
+|   |    IEAT Clause 6.1 (primary 30m), Clause 6.3 (secondary)   |  |
+|   |                                                             |  |
+|   |  PRIORITY 3 -- PLOT SUBDIVISION MATRIX  (From roads)        |  |
+|   |    J-series: 8,000-14,000 sqm, aspect 1:1-1:3              |  |
+|   |    A-series: edge plots (boundary angle), C-series: mega   |  |
+|   |    Utility zones designated BEFORE plot numbering begins    |  |
+|   +-------------------------------------------------------------+  |
+|                                             |                      |
+|   +-----------------------------------------v-----------------+  |
+|   | WhaAISession  (ai_client.py)                               |  |
+|   |                                                             |  |
+|   |  Phase A -- LAYOUT DRAFTING  [phase1_understand()]         |  |
+|   |    Qwen2.5-VL-7B-Instruct (LOCAL, transformers)            |  |
+|   |    Reads DWG topo + WHA reference plans                    |  |
+|   |    -> boundary cartography, basin nominations,             |  |
+|   |       road skeleton, draft plot matrix, site params        |  |
+|   |                                                             |  |
+|   |  Phase B -- CONSTRAINT OPTIMISATION  [phase2_generate()]   |  |
+|   |    QwenImageEditPlusPipeline (LOCAL, diffusers)             |  |
+|   |    _preprocess_topo_for_gen(): 35px pink boundary enforce  |  |
+|   |    Gravity-first utility placement:                         |  |
+|   |      Low points -> Retention Ponds -> WWTP ->              |  |
+|   |      Substation at boundary/grid proximity                  |  |
+|   |    Targets: saleable >=70%, green buffer >=5%              |  |
+|   |    Note: AI-simulated; dedicated solver not yet connected  |  |
+|   |                                                             |  |
+|   |  Phase C -- REGULATORY VERIFICATION  [edit() / review]     |  |
+|   |    IEAT B.E. 2555 clause-by-clause reasoning               |  |
+|   |    Road widths, pond sizing, WWTP setbacks, hydrant grid   |  |
+|   |    Note: AI-reasoned; programmatic rule engine TBD         |  |
+|   |                                                             |  |
+|   |  Edit loop -- iterative refinement                          |  |
+|   |    QwenImageEditPlusPipeline(last_image, instruction)       |  |
+|   +-------------------------------------------------------------+  |
+|                                                                   |
+|   third_party/                                                    |
+|     Qwen-Image/   -- reference code + LoRA training guide        |
+|     ComfyUI/      -- alternative Phase B backend (ControlNet)    |
+|     diffusers/    -- source of QwenImageEditPlusPipeline         |
+|     LocalAI/      -- alternative local API server (future)       |
++-------------------------------------------------------------------+
+`
 
 ---
 
-## Phase-by-Phase Assessment
-
-### Phase 1 — Site Understanding (Qwen2.5-VL-72B via OpenRouter)
+## Phase A -- Layout Drafting  (Qwen2.5-VL-7B-Instruct, LOCAL)
 
 **GOOD:**
-- 72B vision model is genuinely capable of reading WHA reference plans and
-  annotated drawings — label font size, plot codes, dimensions visible at 1280px.
-- Free OpenRouter tier is cost-zero for low-volume POC use.
-- OpenAI SDK used → trivial to swap models or switch to local later.
-- Asking only 3 targeted questions (entry, basins, constraints) keeps responses
-  concise and avoids hallucinated layout geometry.
+- Fully local -- zero cloud cost, no data leaves the machine (satisfies SOP
+  Chain of Custody: client DWG files are never transmitted externally).
+- Qwen2.5-VL-7B reads pink boundary lines, brown contour density, and blue
+  road connection points directly from the DWG-exported PNG.
+- Asking targeted structured questions (boundary, basins, entry, constraints)
+  produces the five output elements required by the SOP: boundary cartography,
+  depression mapping, road skeleton, plot draft, site parameter set.
+- AutoProcessor handles image resizing and tokenisation; bfloat16 + device_map
+  auto manages VRAM.
 
 **BAD / RISK:**
-- OpenRouter free tier has daily quota limits and rate throttling. For demo days
-  or concurrent users, the call can silently fail.
-- The model response quality varies — the free tier serves smaller quantised
-  variants at peak load; paid tier (`qwen2.5-vl-72b-instruct`) is more stable.
-- Phase 1 analysis is fed to Phase 2 as text only (max 600 chars). The VLM
-  reasoning about *where* to place features is lost — it can only describe,
-  not spatially locate features in pixel coordinates.
+- The 7B model is significantly weaker than 72B for reading dense CAD drawings
+  -- label font sizes, plot codes, and dimension text at 1280px may be missed.
+- Phase A analysis feeds Phase B as text only (max 600 chars). The VLM spatial
+  reasoning (where the entry point IS on the image) is lost -- Phase B cannot
+  see marked coordinates unless they are drawn on the topo image.
+- VRAM: ~15 GB for 7B bfloat16. On machines with <16 GB VRAM the model may
+  OOM or fall back to CPU (slow, ~5-10 min for a single analysis pass).
 
 **IMPROVEMENT IDEAS:**
-1. Extract bounding boxes / polygons from Phase 1 (ask the VLM to output
-   JSON with pixel coordinates of entry points and basins).
-2. Overlay those coordinates on the topo image as coloured markers *before*
-   sending to Phase 2 — direct spatial signal for the generator.
-3. Fall back to `qwen/qwen2.5-vl-32b-instruct:free` when 72B quota is hit.
+1. After Phase A, extract coordinates from the narrative and draw  entry arrows
+   + basin circles on the preprocessed topo before passing to Phase B --
+   direct spatial signal for the generator (SOP requirement: spatial feedback loop).
+2. Upgrade to Qwen2.5-VL-32B (quantised to 4-bit via bitsandbytes) for better
+   CAD label reading without full 72B VRAM cost.
+3. Prompt the model to output Phase 1-5 in structured JSON matching the SOP
+   output table (boundary cartography, depression map, road skeleton, plot
+   matrix, site parameter set) rather than free-form prose.
 
 ---
 
-### Phase 2 — Plan Generation (Qwen-Image-Edit-2511 via diffusers, LOCAL)
+## Phase B -- Constraint Optimisation  (Qwen-Image-Edit-2511, LOCAL)
 
 **GOOD:**
 - Running locally via diffusers = zero cloud cost, no rate limits, zero
   data-privacy risk (WHA site layouts never leave the machine).
-- `QwenImageEditPlusPipeline` natively accepts multiple input images — lets
-  us pass all WHA style references + the topo as a unified multi-image prompt.
-  This is architecturally cleaner than the old HF Inference approach.
-- Qwen-Image-Edit-2511 is a 20B MMDiT model (not a 7B upscaler) — it has
-  real understanding of image composition, boundaries, and spatial fill.
-- BF16 CUDA inference uses ~20 GB VRAM (A100/RTX3090 territory). CPU fallback
-  works but takes 20–40 min per image.
-- Demo fallback (`lora/2 copy.png`) keeps the app runnable without GPU.
+- QwenImageEditPlusPipeline natively accepts multiple input images -- WHA
+  style references + topo pass as a unified multi-image prompt.
+- Qwen-Image-Edit-2511 is a 20B MMDiT model with genuine image composition
+  understanding suitable for spatial fill and boundary-following tasks.
+- BF16 CUDA inference uses ~20 GB VRAM (RTX3090/A100). CPU fallback works
+  but takes 20-40 min per image.
+- Demo fallback keeps the app runnable without GPU.
 
 **BAD / RISK:**
-- **MAJOR**: The model was not fine-tuned on industrial master plans. It has no
-  built-in concept of "plot codes J11/J12", "WWTP with grey hatch", or
-  "retention pond blue diagonal hatch". The few-shot prompting approach battles
-  the model's photorealistic training distribution.
-- **MAJOR**: Boundary conformance is the hardest task. The pink boundary
-  preprocessor helps signal the edge, but a diffusion model working in pixel
-  space will still struggle to clip plotlands at exactly the right diagonal angle.
-  The model is optimised for semantic edits (change hair colour, add object) —
-  not strict polygon tracing.
-- Heavy VRAM requirement (20 GB+) is a barrier for most laptops and cloud
-  free tiers. Without an A100/RTX4090, the model either OOMs or runs on CPU.
-- First run downloads ~16 GB of weights. No fallback if download fails mid-way.
-- `num_inference_steps=40` at 20B scale is ~5–15 min on consumer GPU,
-  ~20–40 min on CPU. The Streamlit app will appear frozen with no progress bar.
+- MAJOR: Model was not fine-tuned on industrial master plans. It has no built-in
+  concept of plot codes J11/J12, WWTP grey hatch, or retention pond diagonal
+  hatch. Style prompting battles the model's photorealistic training distribution.
+- MAJOR: Boundary conformance is the hardest unsolved problem. The pink boundary
+  preprocessor signals the edge, but a diffusion model in pixel space will
+  still struggle to clip plot corners at exact diagonal boundary angles.
+  The SOP requires 100% containment -- this is not geometrically guaranteed.
+- Heavy VRAM requirement (20 GB+) blocks most laptops and cloud free tiers.
+- num_inference_steps=40 at 20B scale = 5-15 min on consumer GPU, 20-40 min
+  on CPU. Streamlit UI appears frozen with no progress bar.
+- Phase B is currently AI-simulated constraint optimisation -- it does not run
+  a mathematical solver. Plot areas are proportional estimates, not computed.
 
 **IMPROVEMENT IDEAS:**
-1. **Fine-tune on WHA corpus**: Even a 200-step LoRA on 20–30 completed WHA
-   plans would drastically improve style adherence. See `diffusers` LoRA
-   training scripts and DiffSynth-Studio (mentioned in QwenLM README, runs
-   in 4 GB VRAM via layer-by-layer offload).
-2. **ComfyUI + ControlNet**: For strict boundary tracing, `Comfy-Org/ComfyUI`
-   (in `third_party/`) with a ControlNet Canny/Scribble condition is technically
-   more principled than prompting an image-edit model. ControlNet enforces hard
-   pixel-level constraints. This could be Phase 2 v2.
-3. **Use LightX2V acceleration** (mentioned in QwenLM README): 25× inference
-   speedup via diffusion distillation. Reduces 40-step inference to ~2 steps
-   with minimal quality loss. Install from `ModelTC/Qwen-Image-Lightning`.
-4. **Add a Streamlit progress bar** that polls the pipeline via a background
-   thread — prevents the UI from appearing frozen.
-5. **Use FP8 quantisation** (DiffSynth-Engine / DiffSynth-Studio): Cuts VRAM
-   requirement from ~20 GB to ~8 GB, enabling RTX3070/4070 execution.
+1. Fine-tune on WHA corpus: 200-step LoRA on 20-30 completed WHA plans would
+   drastically improve style adherence and IEAT-aware layout reasoning.
+   DiffSynth-Studio supports LoRA training in 4 GB VRAM via layer offload.
+2. ComfyUI + ControlNet (Comfy-Org/ComfyUI in third_party/): For strict boundary
+   tracing, ControlNet Canny/Scribble conditioning is technically more principled
+   than prompting an image-edit model. Enforces hard pixel-level constraints.
+3. LightX2V acceleration (QwenLM README): 25x inference speedup via diffusion
+   distillation. Reduces 40-step inference to ~2 steps.
+4. FP8 quantisation (DiffSynth-Studio): Cuts VRAM from ~20 GB to ~8 GB,
+   enabling RTX3070/4070 execution.
+5. Add Streamlit progress bar via pipeline callback_on_step_end.
 
 ---
 
-### Pre-Processor (_preprocess_topo_for_gen)
+## Phase C -- Regulatory Verification  (IEAT B.E. 2555)
+
+**Current state:** Phase C runs inside the same AI analysis pass as Phase A/B.
+The system cross-references the generated layout against embedded IEAT rules.
+This is AI-reasoned -- not exhaustive automated clause verification.
+
+**IEAT Compliance Implementation Status:**
+
+| IEAT Clause | Requirement | Status |
+|---|---|---|
+| Clause 6.1 | Primary road >=30m ROW (>1,000 rai) | Implemented |
+| Clause 6.3 | Secondary road >=16m ROW | Implemented |
+| Clause 7 | Road gradient <=4% | Implemented |
+| Clause 15-16 | Storm drainage Rational Method Q=0.278xCxIxA | Partial |
+| Clause 20 | Pump house at every retention pond | Implemented |
+| Clause 21 | Flood berm >=10-yr flood + 50cm | Planned |
+| Clause 30 | WWTP: 80% of daily water supply volume | Partial |
+| Clause 31 | Sewage system separate from storm drainage | Implemented |
+| Clause 36 | Power: 50 KVA per saleable rai | Planned |
+| Clause 38 | Fire hydrant <=150m spacing | Planned |
+| IEAT General | Green buffer >=5% of total site area | Implemented |
+| WHA Standard | Saleable area >=70% of total site area | Implemented |
+
+**IMPROVEMENT IDEAS:**
+1. Build a programmatic rule engine (Python functions for each IEAT clause)
+   that evaluates the Phase A output JSON against numeric thresholds.
+2. Connect to a constraint optimisation solver (OR-Tools / PuLP) for Phase B
+   that guarantees 100% boundary containment, exact area ratios, and road
+   dimensional compliance -- replacing the current AI simulation.
+
+---
+
+## Pre-Processor  (_preprocess_topo_for_gen)
 
 **GOOD:**
-- Pink boundary detection is robust — handles JPEG artifacts, anti-aliasing,
-  sub-pixel grey blending at edges.
-- 7×7 kernel × 5 iterations + binary_fill_holes is technically solid for
-  closing small gaps in DWG-exported boundary lines.
-- 35 px bold pink wall is extremely prominent for the generator to read.
-- Blue→grey road neutralisation prevents the model from re-styling external
+- Pink boundary detection handles JPEG artifacts and anti-aliasing.
+- 7x7 kernel x 5 iterations + binary_fill_holes closes small DWG line gaps.
+- 35px bold pink wall is prominent for Phase B to read.
+- Blue->grey road neutralisation prevents the model from re-styling external
   road reference lines.
 
 **BAD:**
-- Hard-coded colour thresholds `(r - g) > 40`, `(b - g) > 15` only work for
-  WHA's cerise/magenta boundary colour. If a client uses a different CAD colour,
-  the preprocessor silently produces wrong output.
-- The cream fill (`[252, 250, 242]`) is a good interior signal but any dots,
-  text, or notations inside the boundary are also blanked — useful context
-  (existing buildings, infrastructure) is lost.
+- Hard-coded colour thresholds (r-g > 40, b-g > 15) only work for WHA cerise/
+  magenta. Different client CAD colour = wrong output, no warning.
+- Cream fill blanks all internal annotations -- existing infrastructure context lost.
 
 **IMPROVEMENT IDEAS:**
-1. Make the pink thresholds configurable in `config.py` or auto-detect the
-   dominant "thin-line bright colour" in the uploaded DWG.
-2. Preserve a light greyscale version of internal annotations instead of
-   completely blanking them — gives the model more spatial context.
+1. Make pink thresholds configurable in config.py or auto-detect dominant thin-line
+   bright colour in the uploaded DWG.
+2. Preserve a light greyscale version of internal annotations instead of blanking
+   them entirely.
 
 ---
 
-## Tool Ecosystem — Role of Each Third-Party Repo
+## Tool Ecosystem
 
-| Repo | Role in This Project | Status |
-|------|---------------------|--------|
-| `QwenLM/Qwen-Image` | **Primary** — provides model cards, quick-start code, LoRA training guides, prompt engineering examples. Read the `src/examples/` folder. | Used as reference |
-| `huggingface/diffusers` | **Core dependency** — `QwenImageEditPlusPipeline` lives here. Also has LoRA training scripts (`examples/research_projects/`). Required to stay on git HEAD for Qwen support. | Direct dependency |
-| `Comfy-Org/ComfyUI` | **Alternative Phase 2 backend** — node-based workflow with Qwen-Image native support (announced Aug 2025). Better for ControlNet boundary enforcement. Higher setup complexity. | Future option |
-| `mudler/LocalAI` | **Alternative API server** — if you want an OpenAI-compatible local endpoint for Phase 1 (run Qwen2.5-VL via llama.cpp locally). Not needed for Phase 2 (diffusers is simpler). | Future option |
+| Repo | Role | Status |
+|---|---|---|
+| QwenLM/Qwen-Image | Model cards, LoRA training guide, prompt examples | Used as reference |
+| huggingface/diffusers | Core dependency -- QwenImageEditPlusPipeline lives here | Direct dependency |
+| Comfy-Org/ComfyUI | Alternative Phase B backend -- ControlNet boundary enforcement | Future option |
+| mudler/LocalAI | Alternative local API server for Phase A (llama.cpp) | Future option |
 
 ---
 
-## Honest Overall Assessment
+## Current Output Quality
 
-```
-                CURRENT ARCHITECTURE
-╔═══════════════════════════════════════╗
-║  Phase 1 Cloud (OpenRouter)  ██████░░ ║  7/10  solid, free-tier risk
-║  Phase 2 Local (diffusers)   ████░░░░ ║  4/10  works, GPU barrier
-║  Preprocessor                 ███████░ ║  8/10  best part of the system
-║  UI (Streamlit)               ██████░░ ║  7/10  clean, add progress bar
-║  Boundary conformance         ████░░░░ ║  3/10  hard unsolved problem
-╚═══════════════════════════════════════╝
-```
+`
+                CURRENT IMPLEMENTATION
++===========================================+
+|  Phase A -- Layout Drafting   ######....  |  6/10  local 7B, CAD reading ok
+|  Phase B -- Plan Generation   ####......  |  4/10  boundary fidelity gap
+|  Preprocessor                 #######...  |  8/10  best component
+|  UI (Streamlit)               ######....  |  7/10  add progress bar
+|  Boundary conformance         ###.......  |  3/10  hard unsolved problem
+|  IEAT compliance coverage     #####.....  |  5/10  partial -- 6/12 clauses
++===========================================+
+`
 
-**What makes this POC impressive:**
-- Zero external infrastructure — single `streamlit run` command
-- The colour-coded few-shot reference system is a real insight
-- The preprocessor's pink boundary approach is creative and technically valid
-- End-to-end pipeline in <500 lines of clean Python
+**What makes this POC credible:**
+- Zero external infrastructure -- single streamlit run command, fully local
+- Three-tier constraint hierarchy matches IEAT engineering methodology
+- Five-phase SOP output structure (boundary, basins, roads, plots, params)
+- Pink boundary preprocessor is technically valid and creative
+- End-to-end pipeline in clean Python; data never leaves the machine
 
 **What prevents production use:**
-1. Boundary conformance — the biggest gap. A diffusion model cannot reliably
-   trace an irregular polygon with precision. Even with preprocessing, you will
-   get plots that overflow the boundary. Solution: ControlNet (ComfyUI) or
-   constraint-inpainting post-processing.
-2. Style consistency — without LoRA fine-tuning on WHA drawings, every run
-   looks different. The model has to "guess" what WHA style means from 7 images.
-3. VRAM requirement — 20 GB eliminates most hardware. Fine-tuning + FP8
-   quantisation (DiffSynth-Studio) is the right path.
-4. No spatial feedback loop — Phase 1 analysis is text-only. The generator
-   cannot "see" where the entry point is unless it's visually marked on the topo.
+1. Boundary conformance -- diffusion model cannot reliably trace an irregular polygon
+   at sub-metre precision. Solution: ControlNet (ComfyUI) or constraint-inpainting.
+2. No mathematical solver -- plot areas and saleable ratios are estimates only.
+   Production requires OR-Tools / PuLP constraint engine.
+3. VRAM requirement -- 20 GB for Phase B eliminates most hardware.
+4. No spatial feedback loop -- Phase A text output does not mark coordinates on
+   the topo image; Phase B cannot see spatial context unless visually annotated.
+5. Phase C is AI-reasoned opinion, not exhaustive programmatic clause verification.
 
 ---
 
-## Recommended Next Steps (priority order)
+## Recommended Next Steps  (priority order)
 
-1. **Add VRAM estimation on startup** — check `torch.cuda.get_device_properties()`
-   and warn if VRAM < 20 GB before trying to load the pipeline.
-2. **Mark Phase 1 findings on the topo image** — draw entry arrow + basin
-   circles on the preprocessed topo so Phase 2 sees spatial context directly.
-3. **Add inference progress callback** — `pipeline.set_progress_bar_config()`
-   or a custom `callback_on_step_end` to emit Streamlit progress bar updates.
-4. **LoRA fine-tune on existing WHA drawings** — 20–30 completed plans,
-   100–200 training steps. Use DiffSynth-Studio for 4 GB VRAM compatibility.
-5. **Evaluate ComfyUI + Qwen-Image workflow** — specifically for boundary
-   enforcement via ControlNet Canny conditioning on the pink boundary image.
-6. **Install LightX2V acceleration** — reduces generation time from ~15 min
-   to ~2 min on RTX3090 with minimal quality loss.
+1. Mark Phase A findings on topo image -- draw entry arrow + basin circles before
+   Phase B receives the image (direct spatial signal, SOP requirement).
+2. Add VRAM check on startup -- warn if VRAM < 20 GB before loading Phase B pipeline.
+3. Add inference progress callback -- pipeline callback_on_step_end -> Streamlit bar.
+4. LoRA fine-tune on 20-30 completed WHA drawings -- DiffSynth-Studio, 4 GB VRAM.
+5. Build programmatic IEAT rule engine for Phase C -- Python functions per clause.
+6. Evaluate ComfyUI + ControlNet Canny for Phase B boundary enforcement.
+7. LightX2V acceleration -- reduces Phase B generation from ~15 min to ~2 min.
+
+---
+
+*Aligned with: Standard Operating Procedure v1.0, March 2026*
+*Regulatory reference: IEAT Regulations B.E. 2555 (2012)*

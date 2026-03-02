@@ -1,68 +1,121 @@
 # WHA AI Master Plan POC
 
-An AI-powered industrial master plan generator for WHA industrial estates.  
-Upload a site boundary DWG → get a fully-labelled master plan image in WHA visual style.
+**Client:** WHA Corporation (WHA Group), Thailand
+**Domain:** Industrial Estate Development  Land Subdivision & Master Planning
+**Regulator:** IEAT  Industrial Estate Authority of Thailand, Regulations B.E. 2555 (2012)
+**Sites:** WHA RY36 (Rayong), WHA GVTP, WHA IER
 
-**Live demo:** `streamlit run src/app.py` → http://localhost:8512
+An AI-powered industrial master plan generator. Upload a site boundary DWG to get a structured layout analysis and WHA-style master plan image, respecting IEAT regulations and WHA product standards.
+
+**Run:** streamlit run src/app.py   =>   http://localhost:8512
 
 ---
 
 ## How It Works
 
-```
-DWG file upload
-      │
-      ▼
-dwg_utils.py  ──  ConvertAPI (cloud DWG→PNG)
-      │
-      ▼  PIL Image
-┌─────────────────────────────────────────────────┐
-│  WhaAISession  (ai_client.py)                   │
-│                                                  │
-  Phase 1 — Site Understanding  (LOCAL)          |
-│    Qwen2.5-VL-7B via transformers               |
-│    Reads reference plans + topo examples        │
-│    → concise site facts (entry, basins)         │
-│                                                  │
-│  Phase 2 — Plan Generation                      │
-│    Qwen-Image-Edit-2511 (LOCAL, diffusers)      │
-│    Pink boundary preprocessor enforces edge     │
-│    WHA style references injected for quality    │
-│    → master plan PIL image                      │
-│                                                  │
-│  Edit loop — iterative refinement               │
-│    Re-calls local pipeline with last image      │
-└─────────────────────────────────────────────────┘
-```
+`
+DWG / PNG upload  (>=2000x2000 px, pink boundary, blue roads, brown contours)
+      |
+      v
+dwg_utils.py  --  ConvertAPI (DWG -> georeferenced PNG)
+      |
+      v  PIL Image
++----------------------------------------------------------------------+
+|  Three-Tier Constraint Hierarchy  (evaluated before any layout)      |
+|                                                                      |
+|  PRIORITY 1 -- BOUNDARY INTEGRITY  (Absolute / Non-Negotiable)       |
+|    Every road, plot, and utility must lie 100% within pink boundary  |
+|    Pink polygon treated as hard mask -- not a soft guideline         |
+|                                                                      |
+|  PRIORITY 2 -- ROAD SKELETON  (Fixed before any plot is drawn)       |
+|    Primary 30m spine -> Secondary 16m grid -> Block definition       |
+|    IEAT Clause 6.1 (30m primary), Clause 6.3 (16m secondary)        |
+|                                                                      |
+|  PRIORITY 3 -- PLOT SUBDIVISION MATRIX  (Derived from roads)         |
+|    J-series: 8,000-14,000 sqm, 1:1-1:3 aspect ratio                |
+|    A-series: edge plots follow boundary; C-series: mega-blocks       |
++----------------------------------------------------------------------+
+      |
+      v
++----------------------------------------------------------------------+
+|  WhaAISession  (ai_client.py) -- Three-Phase Processing Pipeline     |
+|                                                                      |
+|  Phase A -- LAYOUT DRAFTING  [phase1_understand()]                   |
+|    Model: Qwen2.5-VL-7B-Instruct (LOCAL, transformers)               |
+|    Input: DWG topo + WHA reference plans                             |
+|    Output: Boundary cartography, topographic basin nominations,      |
+|            road skeleton, draft plot subdivision matrix,             |
+|            site parameter set for constraint engine                  |
+|                                                                      |
+|  Phase B -- CONSTRAINT OPTIMISATION  [phase2_generate()]             |
+|    Model: Qwen-Image-Edit-2511 (LOCAL, diffusers)                    |
+|    Pink boundary preprocessor: 35px hard boundary enforcement        |
+|    Gravity-first utility placement (ponds -> WWTP -> substation)     |
+|    Target: saleable area >= 70%, green buffer >= 5%                  |
+|    Output: Verified master plan PIL image in WHA visual style        |
+|    Note: Currently AI-simulated; dedicated optimisation solver TBD   |
+|                                                                      |
+|  Phase C -- REGULATORY VERIFICATION  [edit() / review loop]          |
+|    Clause-by-clause IEAT B.E. 2555 compliance check                  |
+|    Road widths, pond sizing, WWTP setbacks, fire hydrant spacing     |
+|    Note: Currently AI-reasoned; programmatic rule engine TBD         |
+|                                                                      |
+|  Edit loop -- iterative refinement                                   |
+|    Re-calls local pipeline with last image + instruction             |
++----------------------------------------------------------------------+
+`
+
+---
+
+## Input Requirements
+
+### Acceptable formats
+
+| Format | Status | Notes |
+|---|---|---|
+| DWG (AutoCAD) | Recommended | Converted to PNG via ConvertAPI (Aspose-CAD) |
+| PNG from CAD export | Acceptable | >=150 DPI, >=2000 x 2000 px for any site > 50 rai |
+| JPEG mobile photo | Not acceptable | JPEG artifacts corrupt boundary line detection |
+
+### Required colour coding
+
+| Colour | Represents |
+|---|---|
+| Pink / Magenta | Legal site boundary and internal zone divisions |
+| Blue | External public roads (arterial connections) |
+| Brown / Red | Elevation contour lines (topographic depression detection) |
+
+### Boundary rules
+
+- Pink boundary must form a fully closed polygon -- any gap causes plots to extend outside the legal limit
+- 100% of the developable site must be within frame; external roads visible >=200m beyond boundary
+- Pre-check that the DWG layer BOUNDARY is locked and complete before upload
 
 ---
 
 ## Project Structure
 
-```
+`
 WHA_AI_MasterPlan_POC/
-├── src/
-│   ├── app.py            # Streamlit UI (port 8512)
-│   ├── ai_client.py      # Two-phase AI pipeline
-│   ├── config.py         # API keys, model names, paths
-│   ├── prompts.py        # System + generation prompts
-│   └── dwg_utils.py      # DWG → PNG via ConvertAPI
-├── lora/                 # WHA visual style references (9 images)
-│   ├── 1.png … 5.png     # Broader style library
-│   └── target1-3.png     # Closest output-style examples
-├── output/               # Generated master plans saved here
-├── tools/
-│   └── autocad_converter.py  # Local AutoCAD COM automation (DWG→DXF)
-├── third_party/          # Git submodules
-│   ├── Qwen-Image/       # QwenLM model cards + LoRA training guide
-│   ├── ComfyUI/          # Alternative Phase 2 backend (ControlNet)
-│   ├── diffusers/        # HF diffusers source (QwenImageEditPlusPipeline)
-│   └── LocalAI/          # Local OpenAI-compatible server reference
-├── docs/                 # Project documentation
-├── ARCHITECTURE.md       # AI engineering deep-dive analysis
-├── requirements.txt
-└── .gitignore
-```
++-- src/
+|   +-- app.py            # Streamlit UI (port 8512)
+|   +-- ai_client.py      # Three-phase AI pipeline
+|   +-- config.py         # Model names, paths, inference settings
+|   +-- prompts.py        # System + generation prompts (IEAT-aware)
+|   +-- dwg_utils.py      # DWG -> PNG via ConvertAPI
++-- output/               # Generated master plans saved here
++-- tools/
+|   +-- autocad_converter.py  # Local AutoCAD COM automation (DWG->DXF)
++-- third_party/          # Git submodules
+|   +-- Qwen-Image/       # QwenLM model cards + LoRA training guide
+|   +-- ComfyUI/          # Alternative Phase B backend (ControlNet)
+|   +-- diffusers/        # HF diffusers (QwenImageEditPlusPipeline)
+|   +-- LocalAI/          # Local OpenAI-compatible server reference
++-- docs/                 # Project documentation
++-- ARCHITECTURE.md       # Pipeline deep-dive, IEAT compliance status
++-- requirements.txt
++-- .gitignore
+`
 
 ---
 
@@ -70,73 +123,96 @@ WHA_AI_MasterPlan_POC/
 
 ### 1. Clone with submodules
 
-```bash
+`ash
 git clone --recurse-submodules https://github.com/zok213/RealEstate
 cd RealEstate
-```
+`
 
 ### 2. Install dependencies
 
-```bash
+`ash
 pip install -r requirements.txt
-```
+`
 
-> **Phase 2 local inference requires PyTorch + CUDA.**  
-> The default `requirements.txt` installs CPU-only torch.  
-> For GPU (recommended — RTX 3090 / A100, ~20 GB VRAM):
-> ```bash
-> pip install torch --index-url https://download.pytorch.org/whl/cu124
-> ```
-> First run downloads Qwen-Image-Edit-2511 weights (~16 GB) automatically.
+Phase B local inference requires PyTorch + CUDA.
+Default requirements.txt installs CPU-only torch.
+For GPU (recommended -- RTX 3090 / A100, ~20 GB VRAM):
+
+`ash
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+`
+
+First run downloads Qwen-Image-Edit-2511 weights (~16 GB) automatically.
 
 ### 3. Configuration
 
-In `src/config.py` or as environment variables:
+In src/config.py or as environment variables:
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `CONVERTAPI_SECRET` | DWG → PNG cloud conversion | hardcoded in config |
-| `LOCAL_VLM_MODEL` | Phase 1 VLM model name | `Qwen/Qwen2.5-VL-7B-Instruct` |
-| `LOCAL_INFERENCE_DEVICE` | `"auto"` / `"cuda"` / `"cpu"` | `"auto"` |
-| `HF_HOME` | Override HuggingFace model cache path | system default |
+| CONVERTAPI_SECRET | DWG -> PNG cloud conversion | hardcoded in config |
+| LOCAL_VLM_MODEL | Phase A VLM model name | Qwen/Qwen2.5-VL-7B-Instruct |
+| LOCAL_INFERENCE_DEVICE | auto / cuda / cpu | auto |
+| HF_HOME | Override HuggingFace model cache path | system default |
 
 ### 4. Run
 
-```bash
+`ash
 streamlit run src/app.py --server.port 8512
-```
+`
 
 ---
 
 ## Models Used
 
-All models run **100% locally** — no API keys, no cloud, no data leaves your machine.
+All models run 100% locally -- no API keys, no cloud, no client data leaves the machine.
 
 | Phase | Model | Library | Size |
 |---|---|---|---|
-| Phase 1 VLM | `Qwen/Qwen2.5-VL-7B-Instruct` | `transformers` | ~15 GB |
-| Phase 2 Image Gen | `Qwen/Qwen-Image-Edit-2511` | `diffusers` | ~16 GB |
+| Phase A -- Layout Drafting VLM | Qwen/Qwen2.5-VL-7B-Instruct | transformers | ~15 GB |
+| Phase B -- Plan Generation | Qwen/Qwen-Image-Edit-2511 | diffusers | ~16 GB |
 
-Weights download automatically to `~/.cache/huggingface` on first run.  
+Weights download automatically to ~/.cache/huggingface on first run.
 Both phases fall back to demo mode silently if torch/GPU is unavailable.
 
 ---
 
-## What Was Built
+## IEAT Compliance Status
 
-- **Full project cleanup** — removed TestFit adapters, OR-Tools engine, Pydantic models, and all dead code from the original scaffold
-- **Gemini API fully removed** — replaced with Qwen-only pipeline (OpenAI SDK throughout, no Google SDK)
-- **Local inference** — Phase 2 migrated from HuggingFace cloud Inference API to local `QwenImageEditPlusPipeline` (no API token, no rate limits, no data leaves the machine)
-- **Pink boundary preprocessor** — 35 px bold boundary enforcement, interior cream fill, blue road neutralisation
-- **WHA style references** — reference plans injected at 1280px quality-95 JPEG for visual consistency
-- **Streamlit UI** — upload DWG, run Phase 1 silently, generate plan, iterative edit loop, remove site map button
-- **Git setup** — repo at `https://github.com/zok213/RealEstate`, 4 submodules, comprehensive `.gitignore`
+| IEAT Clause | Requirement | Status |
+|---|---|---|
+| Clause 6.1 | Primary road >=30m ROW (>1,000 rai estates) | Implemented |
+| Clause 6.3 | Secondary road >=16m ROW | Implemented |
+| Clause 7 | Road gradient <=4% | Implemented |
+| Clause 15-16 | Storm drainage: Rational Method (Q=0.278xCxIxA) | Partial |
+| Clause 20 | Pump house at every retention pond | Implemented |
+| Clause 21 | Flood berm >=10-yr flood + 50cm | Planned |
+| Clause 30 | WWTP: 80% of daily water supply volume | Partial |
+| Clause 31 | Sewage system separate from storm drainage | Implemented |
+| Clause 36 | Power: 50 KVA per saleable rai | Planned |
+| Clause 38 | Fire hydrant <=150m spacing | Planned |
+| IEAT General | Green buffer >=5% of total site area | Implemented |
+| WHA Standard | Saleable area >=70% of total site area | Implemented |
+
+---
+
+## Prototype Disclosure
+
+This system is a Proof of Concept (POC). The AI engine analyses site topography against historical WHA reference plans and encoded IEAT rules to produce a structured layout analysis. Phases B and C (constraint optimisation and regulatory verification) are currently AI-simulated within a single pass, not mathematically computed by dedicated solvers. All output is a generative draft requiring expert human review before engineering or legal use.
+
+Output is:
+- Schematic master plan narrative -- suitable for human review
+- Parameter recommendations -- for constraint engine input
+- IEAT compliance flag report -- identifies gaps for resolution
+- NOT an IEAT-approved plan
+- NOT a statutory land subdivision document
+- NOT a warranted boundary definition
 
 ---
 
 ## Documentation
 
-- [Architecture Analysis](ARCHITECTURE.md) — honest AI engineering assessment, scoring, improvement roadmap
+- [Architecture Analysis](ARCHITECTURE.md) -- pipeline deep-dive, IEAT compliance, improvement roadmap
 - [Executive Summary](docs/01_Executive_Summary.md)
 - [Technical Architecture](docs/02_Technical_Architecture.md)
 - [Implementation Guide](docs/03_Implementation_Guide_2Weeks.md)
