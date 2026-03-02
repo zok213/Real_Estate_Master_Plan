@@ -10,20 +10,20 @@ CONVERTAPI_SECRET: str = os.environ.get(
     "***REMOVED_CONVERTAPI_KEY***",
 )
 
-# ─── OpenRouter (Phase 1 VLM) ────────────────────────────────────────────────
-# Phase 1 vision analysis uses Qwen2.5-VL via OpenRouter free tier.
-OPENROUTER_API_KEY: str = os.environ.get(
-    "OPENROUTER_API_KEY",
-    "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",
+# ─── Phase 1 Local VLM (Qwen2.5-VL via transformers) ────────────────────────
+# Runs LOCALLY — no API key, no internet required after first weight download.
+# Weights download automatically on first run (~15 GB for 7B, ~150 GB for 72B).
+#
+# Recommended defaults by hardware:
+#   RTX 3090 / 4090 (24 GB VRAM)  → Qwen/Qwen2.5-VL-7B-Instruct
+#   A100 / H100 (40–80 GB VRAM)  → Qwen/Qwen2.5-VL-72B-Instruct
+#   CPU only (slow)               → Qwen/Qwen2.5-VL-3B-Instruct
+#
+# Model card: https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct
+LOCAL_VLM_MODEL: str = os.environ.get(
+    "LOCAL_VLM_MODEL",
+    "Qwen/Qwen2.5-VL-7B-Instruct",
 )
-OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-
-# Phase 1 VLM — Qwen2.5-VL via OpenRouter (free, vision-capable).
-# Swap to any OpenRouter vision model as needed:
-#   qwen/qwen2.5-vl-32b-instruct:free
-#   qwen/qwen3-vl-235b-a22b-thinking  (heavy thinking, slower)
-#   meta-llama/llama-3.2-11b-vision-instruct:free
-VLM_MODEL: str = "qwen/qwen2.5-vl-72b-instruct:free"
 
 # ─── Phase 2 Local Image Generation (diffusers) ──────────────────────────────
 # Qwen-Image-Edit-2511 runs LOCALLY via HuggingFace diffusers library.
