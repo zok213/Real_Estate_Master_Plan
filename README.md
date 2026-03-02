@@ -19,15 +19,15 @@ dwg_utils.py  ──  ConvertAPI (cloud DWG→PNG)
 ┌─────────────────────────────────────────────────┐
 │  WhaAISession  (ai_client.py)                   │
 │                                                  │
-│  Phase 1 — Site Understanding                   │
-│    Qwen2.5-VL-72B via OpenRouter (free tier)    │
+  Phase 1 — Site Understanding  (LOCAL)          |
+│    Qwen2.5-VL-7B via transformers               |
 │    Reads reference plans + topo examples        │
 │    → concise site facts (entry, basins)         │
 │                                                  │
 │  Phase 2 — Plan Generation                      │
 │    Qwen-Image-Edit-2511 (LOCAL, diffusers)      │
 │    Pink boundary preprocessor enforces edge     │
-│    7 few-shot WHA style references injected     │
+│    WHA style references injected for quality    │
 │    → master plan PIL image                      │
 │                                                  │
 │  Edit loop — iterative refinement               │
@@ -89,16 +89,16 @@ pip install -r requirements.txt
 > ```
 > First run downloads Qwen-Image-Edit-2511 weights (~16 GB) automatically.
 
-### 3. Set API keys
+### 3. Configuration
 
 In `src/config.py` or as environment variables:
 
-| Variable | Purpose | Required |
+| Variable | Purpose | Default |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Phase 1 VLM (Qwen2.5-VL-72B, free tier) | Yes |
-| `CONVERTAPI_SECRET` | DWG → PNG cloud conversion | Yes |
-| `LOCAL_INFERENCE_DEVICE` | `"auto"` / `"cuda"` / `"cpu"` | Optional |
-| `HF_HOME` | Override HuggingFace model cache path | Optional |
+| `CONVERTAPI_SECRET` | DWG → PNG cloud conversion | hardcoded in config |
+| `LOCAL_VLM_MODEL` | Phase 1 VLM model name | `Qwen/Qwen2.5-VL-7B-Instruct` |
+| `LOCAL_INFERENCE_DEVICE` | `"auto"` / `"cuda"` / `"cpu"` | `"auto"` |
+| `HF_HOME` | Override HuggingFace model cache path | system default |
 
 ### 4. Run
 
@@ -110,12 +110,15 @@ streamlit run src/app.py --server.port 8512
 
 ## Models Used
 
-| Phase | Model | Where |
-|---|---|---|
-| Phase 1 VLM | `qwen/qwen2.5-vl-72b-instruct:free` | OpenRouter (cloud, free) |
-| Phase 2 Image Gen | `Qwen/Qwen-Image-Edit-2511` | Local via `diffusers` |
+All models run **100% locally** — no API keys, no cloud, no data leaves your machine.
 
-Phase 2 falls back to a demo image (`lora/2 copy.png`) automatically if torch is not installed or GPU is out of memory.
+| Phase | Model | Library | Size |
+|---|---|---|---|
+| Phase 1 VLM | `Qwen/Qwen2.5-VL-7B-Instruct` | `transformers` | ~15 GB |
+| Phase 2 Image Gen | `Qwen/Qwen-Image-Edit-2511` | `diffusers` | ~16 GB |
+
+Weights download automatically to `~/.cache/huggingface` on first run.  
+Both phases fall back to demo mode silently if torch/GPU is unavailable.
 
 ---
 
@@ -125,7 +128,7 @@ Phase 2 falls back to a demo image (`lora/2 copy.png`) automatically if torch is
 - **Gemini API fully removed** — replaced with Qwen-only pipeline (OpenAI SDK throughout, no Google SDK)
 - **Local inference** — Phase 2 migrated from HuggingFace cloud Inference API to local `QwenImageEditPlusPipeline` (no API token, no rate limits, no data leaves the machine)
 - **Pink boundary preprocessor** — 35 px bold boundary enforcement, interior cream fill, blue road neutralisation
-- **7-image few-shot system** — WHA style references injected at 1280px quality-95 JPEG
+- **WHA style references** — reference plans injected at 1280px quality-95 JPEG for visual consistency
 - **Streamlit UI** — upload DWG, run Phase 1 silently, generate plan, iterative edit loop, remove site map button
 - **Git setup** — repo at `https://github.com/zok213/RealEstate`, 4 submodules, comprehensive `.gitignore`
 

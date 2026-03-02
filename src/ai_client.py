@@ -1,22 +1,22 @@
 """
-ai_client.py — Two-phase AI pipeline (Qwen-only, no Google/Gemini SDK).
+ai_client.py — Two-phase AI pipeline (100% local, no cloud APIs).
 
 Phase 1 — Silent Reference Understanding
-  Qwen2.5-VL-72B via OpenRouter (free tier, vision-capable).
+  Qwen2.5-VL (7B by default) via HuggingFace transformers, running LOCALLY.
+  No API key. Weights download automatically on first run.
   Analyses WHA reference plans + topo examples.
   Returns concise factual site data (<= 800 words).
 
 Phase 2 — Master Plan Generation
   Qwen-Image-Edit-2511 running LOCALLY via HuggingFace diffusers.
-  No cloud API or token needed — model weights (~16 GB) download to
-  ~/.cache/huggingface on first run.
-  Takes: sys prompt + few-shot style refs + topo image + Phase 1 facts.
+  No API key. Weights (~16 GB) download automatically on first run.
+  Takes: sys prompt + few-shot refs + topo image + Phase 1 facts.
   Returns: generated master-plan PIL image.
 
 Follow-up — Edit mode
   Re-calls the local diffusers pipeline with the last generated image.
 
-Demo mode (fallback when torch/diffusers not installed or GPU OOM):
+Demo mode (fallback when torch not installed or GPU OOM):
   Returns lora/2 copy.png silently as a stand-in for the real output.
 """
 import base64
@@ -25,7 +25,6 @@ import os
 import re
 
 import numpy as np
-from openai import OpenAI
 from PIL import Image
 from scipy.ndimage import binary_dilation, binary_fill_holes
 
@@ -34,11 +33,9 @@ from config import (
     HF_HOME,
     IMG_GEN_MODEL,
     LOCAL_INFERENCE_DEVICE,
-    OPENROUTER_API_KEY,
-    OPENROUTER_BASE_URL,
+    LOCAL_VLM_MODEL,
     REFERENCE_PLAN_PATHS,
     TARGET_EXAMPLE_PATHS,
-    VLM_MODEL,
 )
 from prompts import (
     EDIT_SYSTEM,
@@ -62,11 +59,53 @@ _TRIVIAL = {
 _TOPO_MAX_PX = 3072
 
 
-# ── OpenAI-compatible clients ─────────────────────────────────────────────────
+# ── Local VLM — Qwen2.5-VL via transformers (lazy-loaded) ───────────────────
 
-def _make_openrouter_client() -> OpenAI:
-    """Phase 1: OpenRouter (Qwen2.5-VL, free vision tier)."""
-    return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=OPENROUTER_API_KEY)
+_vlm_model_instance = None   # type: ignore
+_vlm_processor_instance = None  # type: ignore
+
+
+def _get_local_vlm():
+    """
+    Lazy-init Qwen2.5-VL via HuggingFace transformers (100% local).
+    Returns (model, processor) on success, (None, None) on any error.
+    """
+    global _vlm_model_instance, _vlm_processor_instance
+    if _vlm_model_instance is not None:
+        return _vlm_model_instance, _vlm_processor_instance
+
+    try:
+        import torch  # noqa: PLC0415
+        from transformers import (  # noqa: PLC0415
+            AutoProcessor,
+            Qwen2_5_VLForConditionalGeneration,
+        )
+
+        if HF_HOME:
+            os.environ["HF_HOME"] = HF_HOME
+
+        device_cfg = LOCAL_INFERENCE_DEVICE.lower()
+        device = "cuda" if (
+            device_cfg == "auto" and torch.cuda.is_available()
+        ) or device_cfg == "cuda" else "cpu"
+
+        dtype = torch.bfloat16 if device == "cuda" else torch.float32
+
+        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+            LOCAL_VLM_MODEL,
+            torch_dtype=dtype,
+            device_map="auto",
+        )
+        processor = AutoProcessor.from_pretrained(LOCAL_VLM_MODEL)
+
+        _vlm_model_instance = model
+        _vlm_processor_instance = processor
+        return _vlm_model_instance, _vlm_processor_instance
+
+    except ImportError:
+        return None, None
+    except Exception:  # noqa: BLE001
+        return None, None
 
 
 # ── Local diffusers pipeline (lazy-loaded on first generate call) ────────────
@@ -422,7 +461,7 @@ class WhaAISession:
 
         Part ordering (visual-dominant — critical for boundary fidelity):
           1. SYSTEM PROMPT           — role + hard rules
-          2. 7 few-shot style refs   — establish visual output style
+          2. WHA style refs          — establish visual output style
           3. Topo as BOUNDARY CANVAS — shape lock (first send)
           4. Topo as PLANNING BASE   — content placement (second send)
           5. GENERATION_PROMPT       — synthesis instruction

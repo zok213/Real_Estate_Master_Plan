@@ -23,7 +23,7 @@
 │   │                                                           │   │
 │   │  Phase 2 ── phase2_generate()                            │   │
 │   │    ├─ _preprocess_topo_for_gen() (pink boundary enforce) │   │
-│   │    ├─ Load 7 few-shot style references                   │   │
+│   │    ├─ Load WHA style references                          │   │
 │   │    └─ diffusers QwenImageEditPlusPipeline (LOCAL)        │   │
 │   │         → master plan PIL image                          │   │
 │   │                                                           │   │
@@ -77,7 +77,7 @@
 - Running locally via diffusers = zero cloud cost, no rate limits, zero
   data-privacy risk (WHA site layouts never leave the machine).
 - `QwenImageEditPlusPipeline` natively accepts multiple input images — lets
-  us pass all 7 few-shot references + the topo as a unified multi-image prompt.
+  us pass all WHA style references + the topo as a unified multi-image prompt.
   This is architecturally cleaner than the old HF Inference approach.
 - Qwen-Image-Edit-2511 is a 20B MMDiT model (not a 7B upscaler) — it has
   real understanding of image composition, boundaries, and spatial fill.

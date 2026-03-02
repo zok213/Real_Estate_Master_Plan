@@ -119,3 +119,7 @@ aspose_*/
 *.metadata.json
 *.resolved
 *.resolved.*
+
+# Local training data
+lora/
+
