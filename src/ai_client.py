@@ -1,23 +1,20 @@
 """
-ai_client.py — Two-phase AI pipeline (100% local, no cloud APIs).
+ai_client.py — Two-phase AI pipeline (cloud: OpenRouter + Gemini).
 
 Phase 1 — Silent Reference Understanding
-  Qwen2.5-VL (7B by default) via HuggingFace transformers, running LOCALLY.
-  No API key. Weights download automatically on first run.
+  Qwen2.5-VL-72B via OpenRouter API (qwen/qwen2.5-vl-72b-instruct:free).
+  Requires OPENROUTER_API_KEY env var. Free tier, no per-token charge.
   Analyses WHA reference plans + topo examples.
   Returns concise factual site data (<= 800 words).
 
 Phase 2 — Master Plan Generation
-  Qwen-Image-Edit-2511 running LOCALLY via HuggingFace diffusers.
-  No API key. Weights (~16 GB) download automatically on first run.
+  Google Gemini (gemini-2.0-flash-preview-image-generation) via google-genai.
+  Requires GEMINI_API_KEY env var (get from https://aistudio.google.com).
   Takes: sys prompt + few-shot refs + topo image + Phase 1 facts.
   Returns: generated master-plan PIL image.
 
 Follow-up — Edit mode
-  Re-calls the local diffusers pipeline with the last generated image.
-
-Demo mode (fallback when torch not installed or GPU OOM):
-  Returns lora/2 copy.png silently as a stand-in for the real output.
+  Re-calls Gemini with the last generated image + new edit instruction.
 """
 import base64
 import io
@@ -28,14 +25,19 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import binary_dilation, binary_fill_holes
 
+from openai import OpenAI
+import google.genai as genai
+from google.genai import types as genai_types
+
 from config import (
     FEW_SHOT_PATHS,
-    HF_HOME,
-    IMG_GEN_MODEL,
-    LOCAL_INFERENCE_DEVICE,
-    LOCAL_VLM_MODEL,
+    GEMINI_API_KEY,
+    GEMINI_IMAGE_MODEL,
+    OPENROUTER_API_KEY,
+    OPENROUTER_BASE_URL,
     REFERENCE_PLAN_PATHS,
     TARGET_EXAMPLE_PATHS,
+    VLM_MODEL,
 )
 from prompts import (
     EDIT_SYSTEM,
@@ -59,104 +61,23 @@ _TRIVIAL = {
 _TOPO_MAX_PX = 3072
 
 
-# ── Local VLM — Qwen2.5-VL via transformers (lazy-loaded) ───────────────────
-
-_vlm_model_instance = None   # type: ignore
-_vlm_processor_instance = None  # type: ignore
+# ── OpenRouter client helper ──────────────────────────────────────────────────
 
 
-def _get_local_vlm():
+def _make_openrouter_client() -> OpenAI:
     """
-    Lazy-init Qwen2.5-VL via HuggingFace transformers (100% local).
-    Returns (model, processor) on success, (None, None) on any error.
+    Return an openai.OpenAI client pointed at the OpenRouter endpoint.
+    Raises RuntimeError if OPENROUTER_API_KEY is not set.
     """
-    global _vlm_model_instance, _vlm_processor_instance
-    if _vlm_model_instance is not None:
-        return _vlm_model_instance, _vlm_processor_instance
-
-    try:
-        import torch  # noqa: PLC0415
-        from transformers import (  # noqa: PLC0415
-            AutoProcessor,
-            Qwen2_5_VLForConditionalGeneration,
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is not set. "
+            "Get a free key at https://openrouter.ai and set the env var."
         )
-
-        if HF_HOME:
-            os.environ["HF_HOME"] = HF_HOME
-
-        device_cfg = LOCAL_INFERENCE_DEVICE.lower()
-        device = "cuda" if (
-            device_cfg == "auto" and torch.cuda.is_available()
-        ) or device_cfg == "cuda" else "cpu"
-
-        dtype = torch.bfloat16 if device == "cuda" else torch.float32
-
-        model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-            LOCAL_VLM_MODEL,
-            torch_dtype=dtype,
-            device_map="auto",
-        )
-        processor = AutoProcessor.from_pretrained(LOCAL_VLM_MODEL)
-
-        _vlm_model_instance = model
-        _vlm_processor_instance = processor
-        return _vlm_model_instance, _vlm_processor_instance
-
-    except ImportError:
-        return None, None
-    except Exception:  # noqa: BLE001
-        return None, None
-
-
-# ── Local diffusers pipeline (lazy-loaded on first generate call) ────────────
-
-_pipeline_instance = None  # type: ignore
-
-
-def _get_local_pipeline():
-    """
-    Lazy-init Qwen-Image-Edit-2511 via HuggingFace diffusers.
-
-    First call downloads ~16 GB weights to ~/.cache/huggingface.
-    Subsequent calls reuse the in-memory pipeline.
-
-    Returns the pipeline on success, None on any error (falls back to demo).
-    """
-    global _pipeline_instance
-    if _pipeline_instance is not None:
-        return _pipeline_instance
-
-    try:
-        import torch  # noqa: PLC0415
-        from diffusers import QwenImageEditPlusPipeline  # noqa: PLC0415
-
-        # Set HF cache dir if overridden
-        if HF_HOME:
-            os.environ["HF_HOME"] = HF_HOME
-
-        # Resolve device
-        device_cfg = LOCAL_INFERENCE_DEVICE.lower()
-        if device_cfg == "auto":
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        else:
-            device = device_cfg
-
-        dtype = torch.bfloat16 if device == "cuda" else torch.float32
-
-        pipe = QwenImageEditPlusPipeline.from_pretrained(
-            IMG_GEN_MODEL,
-            torch_dtype=dtype,
-        ).to(device)
-
-        _pipeline_instance = pipe
-        return _pipeline_instance
-
-    except ImportError:
-        # torch / diffusers not installed — demo mode
-        return None
-    except Exception:  # noqa: BLE001
-        # GPU OOM, weight download error, etc. — demo mode
-        return None
+    return OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url=OPENROUTER_BASE_URL,
+    )
 
 
 # ── Image helpers ─────────────────────────────────────────────────────────────
@@ -568,48 +489,53 @@ class WhaAISession:
         content.append({"type": "text", "text": "PLANNING BASE (place content here):"})
         content.append({"type": "image_url", "image_url": {"url": topo_url}})
 
-        # ── LOCAL DIFFUSERS INFERENCE ─────────────────────────────────────
-        pipeline = _get_local_pipeline()
+        # ── GEMINI IMAGE GENERATION ───────────────────────────────────────
+        if not GEMINI_API_KEY:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. "
+                "Get a free key at https://aistudio.google.com"
+            )
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-        if pipeline is not None:
-            try:
-                import torch  # noqa: PLC0415
+        # Build multimodal parts: text prompt + few-shot images + topo
+        parts: list = [genai_types.Part.from_text(text=combined_prompt)]
+        for fs_img in few_shot_imgs:
+            fs_buf = io.BytesIO()
+            fs_img.save(fs_buf, format="JPEG", quality=95)
+            fs_buf.seek(0)
+            parts.append(genai_types.Part.from_bytes(
+                data=fs_buf.read(), mime_type="image/jpeg",
+            ))
+        topo_buf = io.BytesIO()
+        resized_topo.save(topo_buf, format="PNG")
+        topo_buf.seek(0)
+        parts.append(genai_types.Part.from_bytes(
+            data=topo_buf.read(), mime_type="image/png",
+        ))
 
-                # Images: few-shot references first, then the preprocessed topo
-                img_list = few_shot_imgs + [resized_topo]
-
-                with torch.inference_mode():
-                    output = pipeline(
-                        image=img_list,
-                        prompt=combined_prompt,
-                        true_cfg_scale=4.0,
-                        negative_prompt=" ",
-                        num_inference_steps=40,
-                        guidance_scale=1.0,
-                        num_images_per_prompt=1,
-                    )
-                gen_image = output.images[0]
-                self._last_generated = gen_image
-                return "", gen_image
-
-            except Exception:  # noqa: BLE001
-                pass  # fall through to demo mode
-
-        # ── DEMO FALLBACK (torch not installed / GPU OOM) ─────────────────
-        _demo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "lora", "2 copy.png",
+        response = gemini_client.models.generate_content(
+            model=GEMINI_IMAGE_MODEL,
+            contents=parts,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["TEXT", "IMAGE"],
+            ),
         )
-        _demo_img = Image.open(_demo_path).copy()
-        self._last_generated = _demo_img
-        return "", _demo_img
+        gen_image = None
+        for part in response.candidates[0].content.parts:
+            if part.inline_data is not None:
+                gen_image = Image.open(io.BytesIO(part.inline_data.data))
+                break
+        if gen_image is None:
+            raise RuntimeError("Gemini returned no image in the response.")
+        self._last_generated = gen_image
+        return "", gen_image
 
     # ── Edit mode ─────────────────────────────────────────────────────────────
 
     def edit(self, user_text: str) -> tuple[str, Image.Image | None]:
         """
-        Edit the last generated plan by sending it back to Qwen-Image-Edit
-        with a new instruction.
+        Edit the last generated plan via Gemini image generation.
+        Sends the previously generated image + edit instruction to Gemini.
         """
         if self._last_generated is None:
             return (
@@ -619,36 +545,35 @@ class WhaAISession:
 
         edit_prompt = EDIT_SYSTEM + "\n\n" + user_text
 
-        # ── LOCAL DIFFUSERS INFERENCE ─────────────────────────────────────
-        pipeline = _get_local_pipeline()
+        # ── GEMINI IMAGE EDIT ─────────────────────────────────────────────
+        if not GEMINI_API_KEY:
+            raise RuntimeError(
+                "GEMINI_API_KEY is not set. "
+                "Get a free key at https://aistudio.google.com"
+            )
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-        if pipeline is not None:
-            try:
-                import torch  # noqa: PLC0415
+        parts: list = [genai_types.Part.from_text(text=edit_prompt)]
+        img_buf = io.BytesIO()
+        self._last_generated.save(img_buf, format="PNG")
+        img_buf.seek(0)
+        parts.append(genai_types.Part.from_bytes(
+            data=img_buf.read(), mime_type="image/png",
+        ))
 
-                edit_image = self._last_generated
-                with torch.inference_mode():
-                    output = pipeline(
-                        image=[edit_image],
-                        prompt=edit_prompt,
-                        true_cfg_scale=4.0,
-                        negative_prompt=" ",
-                        num_inference_steps=40,
-                        guidance_scale=1.0,
-                        num_images_per_prompt=1,
-                    )
-                gen_image = output.images[0]
-                self._last_generated = gen_image
-                return "", gen_image
-
-            except Exception:  # noqa: BLE001
-                pass  # fall through to demo mode
-
-        # ── DEMO FALLBACK ─────────────────────────────────────────────────
-        _demo_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "lora", "2 copy.png",
+        response = gemini_client.models.generate_content(
+            model=GEMINI_IMAGE_MODEL,
+            contents=parts,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["TEXT", "IMAGE"],
+            ),
         )
-        _demo_img = Image.open(_demo_path).copy()
-        self._last_generated = _demo_img
-        return "", _demo_img
+        gen_image = None
+        for part in response.candidates[0].content.parts:
+            if part.inline_data is not None:
+                gen_image = Image.open(io.BytesIO(part.inline_data.data))
+                break
+        if gen_image is None:
+            raise RuntimeError("Gemini returned no image in the response.")
+        self._last_generated = gen_image
+        return "", gen_image

@@ -38,3 +38,5 @@ convertapi>=1.4.0
 
 # ── CAD parsing (optional — for DXF layer inspection) ────────────────────────
 ezdxf>=1.1.0
+openai>=1.30.0
+google-genai>=1.0.0

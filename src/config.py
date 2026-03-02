@@ -5,44 +5,23 @@ All API keys, model names, file paths, and tunable settings live here.
 import os
 
 # ─── ConvertAPI (DWG → PNG cloud conversion) ─────────────────────────────────
-CONVERTAPI_SECRET: str = os.environ.get(
-    "CONVERTAPI_SECRET",
-    "***REMOVED_CONVERTAPI_KEY***",
+CONVERTAPI_SECRET: str = os.environ.get("CONVERTAPI_SECRET", "")
+
+# ─── Phase 1 Cloud VLM (OpenRouter → Qwen2.5-VL-72B) ────────────────────────
+# Requires OPENROUTER_API_KEY env var — get a free key at https://openrouter.ai
+# The free-tier model qwen2.5-vl-72b-instruct:free has no per-token charge.
+OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+VLM_MODEL: str = os.environ.get(
+    "VLM_MODEL",
+    "qwen/qwen2.5-vl-72b-instruct:free",
 )
 
-# ─── Phase 1 Local VLM (Qwen2.5-VL via transformers) ────────────────────────
-# Runs LOCALLY — no API key, no internet required after first weight download.
-# Weights download automatically on first run (~15 GB for 7B, ~150 GB for 72B).
-#
-# Recommended defaults by hardware:
-#   RTX 3090 / 4090 (24 GB VRAM)  → Qwen/Qwen2.5-VL-7B-Instruct
-#   A100 / H100 (40–80 GB VRAM)  → Qwen/Qwen2.5-VL-72B-Instruct
-#   CPU only (slow)               → Qwen/Qwen2.5-VL-3B-Instruct
-#
-# Model card: https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct
-LOCAL_VLM_MODEL: str = os.environ.get(
-    "LOCAL_VLM_MODEL",
-    "Qwen/Qwen2.5-VL-7B-Instruct",
-)
-
-# ─── Phase 2 Local Image Generation (diffusers) ──────────────────────────────
-# Qwen-Image-Edit-2511 runs LOCALLY via HuggingFace diffusers library.
-# No API key or cloud service needed — model weights download on first run
-# to: ~/.cache/huggingface/hub  (~16 GB for fp16 weights)
-#
-# Requirements: pip install torch diffusers transformers accelerate
-# GPU strongly recommended (CUDA); CPU fallback supported but very slow.
-#
-# Model card: https://huggingface.co/Qwen/Qwen-Image-Edit-2511
-# Source:     https://github.com/QwenLM/Qwen-Image
-IMG_GEN_MODEL: str = "Qwen/Qwen-Image-Edit-2511"
-
-# Compute device for local inference: "cuda", "cpu", or "auto"
-# "auto" → uses CUDA if available, otherwise CPU.
-LOCAL_INFERENCE_DEVICE: str = os.environ.get("LOCAL_INFERENCE_DEVICE", "auto")
-
-# HuggingFace hub cache directory (set empty to use default ~/.cache/huggingface)
-HF_HOME: str = os.environ.get("HF_HOME", "")
+# ─── Phase 2 Cloud Image Generation (Google Gemini) ──────────────────────────
+# Requires GEMINI_API_KEY env var — get a free key at https://aistudio.google.com
+# gemini-2.0-flash-preview-image-generation supports multi-image input + output.
+GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_IMAGE_MODEL: str = "gemini-2.0-flash-preview-image-generation"
 
 # ─── Root Paths ───────────────────────────────────────────────────────────────
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
