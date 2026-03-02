@@ -97,6 +97,21 @@ docker/*.env
 logs/
 *.out
 
+# ─── Project-internal planning / task files ──────────────────────────────────
+task.md
+constraints.json
+regulation/
+regulation
+expert_reasoning/
+input/
+Ecosystem-Architecture.md
+Standard Operating Procedure*.md
+
+# ─── Aspose.CAD / ConvertAPI temporary outputs ───────────────────────────────
+# (free-tier conversions carry "Evaluation only" watermark)
+*.aspose*
+aspose_*/
+
 # ─── Misc ─────────────────────────────────────────────────────────────────────
 *.tmp
 *.bak
