@@ -1,0 +1,61 @@
+# ── Python bytecode & caches ──────────────────────────────────────────────────
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+
+# ── Git & version control ─────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitmodules
+.gitattributes
+
+# ── Secrets & local config ────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Local dev tools ───────────────────────────────────────────────────────────
+tools/
+tests/
+
+# ── Documentation (not needed at runtime) ────────────────────────────────────
+docs/
+*.md
+*.md.metadata.json
+ARCHITECTURE.md
+walkthrough.md
+task.md
+
+# ── Customer DWG files (private data — never in Docker image) ────────────────
+customer docs/
+input/
+
+# ── Third-party submodules (ComfyUI, diffusers, LocalAI, Qwen) ───────────────
+# These are local inference tools — cloud branch uses APIs instead
+third_party/
+
+# ── Generated outputs (ephemeral, written at runtime) ─────────────────────────
+output/
+
+# ── IDE / OS artifacts ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Build artifacts ───────────────────────────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Regulation documents (large, not required at runtime) ────────────────────
+regulation/

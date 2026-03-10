@@ -76,7 +76,7 @@ PHASE1_UNDERSTANDING_PROMPT = (
     "Your job is to extract FACTUAL LOCATIONAL DATA from the topo images."
     " The image generation model will read the topo visually for boundary"
     " shape -- do NOT describe boundary geometry in your answer."
-    " Only answer the 3 questions below. Be short and precise.\n"
+    " Answer all 3 questions below thoroughly and completely.\n"
     "\n"
     "QUESTION 1 -- ROAD ENTRY POINT(S)\n"
     "   Where does the external road (blue or grey stub) touch the pink"
@@ -103,7 +103,7 @@ PHASE1_UNDERSTANDING_PROMPT = (
     "   · Which quadrant has high ground (no ponds)\n"
     "   · Any narrow corridor or protrusion that limits plot size\n"
     "\n"
-    "STOP after these 3 questions. Under 400 words total."
+    "STOP after these 3 questions."
     " Do not describe boundary shape geometry. The drawing model reads"
     " the visual image directly for that.\n"
 )

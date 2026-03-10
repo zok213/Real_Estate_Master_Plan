@@ -1,27 +1,30 @@
 """
 config.py — Central configuration for WHA Auto Design AI
-All API keys, model names, file paths, and tunable settings live here.
+All API keys are loaded from environment variables.
+  - Local dev:  set values in .env  (see .env.example)
+  - Production: set as HF Spaces Secrets (Settings → Variables and secrets)
 """
 import os
+from dotenv import load_dotenv
+
+# Load .env for local development — no-op when running in Docker / HF Spaces
+load_dotenv()
 
 # ─── ConvertAPI (DWG → PNG cloud conversion) ─────────────────────────────────
 CONVERTAPI_SECRET: str = os.environ.get("CONVERTAPI_SECRET", "")
 
-# ─── Phase 1 Cloud VLM (OpenRouter → Qwen2.5-VL-72B) ────────────────────────
-# Requires OPENROUTER_API_KEY env var — get a free key at https://openrouter.ai
-# The free-tier model qwen2.5-vl-72b-instruct:free has no per-token charge.
+# ─── Phase 1 Cloud VLM (OpenRouter → Qwen3-VL-235B-A22B-Thinking) ────────────
+# Set PHASE1_ENABLED = False when the OpenRouter key is revoked / inactive.
+PHASE1_ENABLED: bool = False
 OPENROUTER_API_KEY: str = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-VLM_MODEL: str = os.environ.get(
-    "VLM_MODEL",
-    "qwen/qwen2.5-vl-72b-instruct:free",
-)
+VLM_MODEL: str = "qwen/qwen3-vl-235b-a22b-thinking"
 
 # ─── Phase 2 Cloud Image Generation (Google Gemini) ──────────────────────────
-# Requires GEMINI_API_KEY env var — get a free key at https://aistudio.google.com
-# gemini-2.0-flash-preview-image-generation supports multi-image input + output.
+# Set PHASE2_ENABLED = False to disable Gemini calls.
+PHASE2_ENABLED: bool = True
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_IMAGE_MODEL: str = "gemini-2.0-flash-preview-image-generation"
+GEMINI_IMAGE_MODEL: str = "gemini-3.1-flash-image-preview"
 
 # ─── Root Paths ───────────────────────────────────────────────────────────────
 _SRC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +40,7 @@ TOPO_CACHE_PATH: str = os.path.join(OUTPUT_DIR, "topo_cache.png")
 
 # ─── Reference & Target Image Lists ──────────────────────────────────────────
 REFERENCE_PLAN_PATHS: list[str] = [
-    os.path.join(LORA_DIR, f"{i}.png") for i in range(1, 6)
+    os.path.join(LORA_DIR, f"{i}.png") for i in range(1, 7)
 ]
 
 TARGET_EXAMPLE_PATHS: list[str] = [
@@ -58,6 +61,7 @@ FEW_SHOT_PATHS: list[str] = [
     os.path.join(LORA_DIR, "3.png"),
     os.path.join(LORA_DIR, "4.png"),
     os.path.join(LORA_DIR, "5.png"),
+    os.path.join(LORA_DIR, "6.png"),
 ]
 
 # ─── IEAT / Site Constraints ──────────────────────────────────────────────────

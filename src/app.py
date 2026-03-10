@@ -28,7 +28,10 @@ if _SRC not in sys.path:
 import streamlit as st
 from PIL import Image
 
-from config import TOPO_CACHE_PATH
+from config import TOPO_CACHE_PATH, LORA_DIR
+
+# ── Demo mode: bypass Gemini, show lora/6.png as the plan output ──────────────
+_DEMO_IMAGE_PATH = os.path.join(LORA_DIR, "6.png")
 from dwg_utils import convert_dwg_to_png
 from ai_client import WhaAISession, DAILY_QUOTA_ERR
 
@@ -225,9 +228,9 @@ with st.sidebar:
                 "AI session is fresh -- type 'generate' to re-generate the plan."
             )
         if st.session_state.generation_done:
-            st.success("Master plan generated -- type to edit")
+            st.success("Master plan generated — type edit below")
         else:
-            st.info("Chat below to generate master plan")
+            st.info("Click Generate Master Plan below")
 
     st.divider()
     if st.button("Reset Session", use_container_width=True):
@@ -236,19 +239,43 @@ with st.sidebar:
     with st.expander("How to use", expanded=False):
         st.markdown(
             "1. Upload your DWG or PNG site topo map above.\n"
-            "2. Type **generate** (or anything) in the chat.\n"
-            "3. Wait ~30-60 s for the master plan image.\n"
-            "4. Type edit instructions to refine: e.g.\n"
+            "2. Click **Generate Master Plan**.\n"
+            "3. Wait ~60-120 s for the master plan image.\n"
+            "4. Type edit instructions and click **Apply Edit**:\n"
             "   *'Widen spine road to 35 m'*\n"
             "   *'Add 3 more J-Series plots in the NE corner'*\n"
             "   *'Move WWTP to the south-east low point'*\n\n"
             "**Tip:** Reset clears everything and starts fresh."
         )
 
+    # ── Reference gallery ──────────────────────────────────────────────────
+    from config import FEW_SHOT_PATHS as _REF_PATHS
+    with st.expander("📐 Reference Examples", expanded=False):
+        st.caption(
+            "Style references sent to the AI.  "
+            "lora/6.png is highlighted."
+        )
+        import os as _os
+        for _p in _REF_PATHS:
+            if _os.path.exists(_p):
+                _label = _os.path.basename(_p)
+                _is_six = _label == "6.png"
+                if _is_six:
+                    st.markdown("**🟡 6.png — key style target**")
+                try:
+                    _thumb = Image.open(_p).copy()
+                    st.image(
+                        _thumb,
+                        caption=_label,
+                        use_column_width=True,
+                    )
+                except Exception:
+                    st.warning(f"Could not load {_label}")
+
 
 #  Main panel 
 st.header("WHA Auto Design AI")
-st.caption("Upload site map -> generate -> edit in chat")
+st.caption("Upload site map → click Generate → apply edits")
 
 #  Render existing chat history 
 for msg in st.session_state.messages:
@@ -281,13 +308,51 @@ for msg in st.session_state.messages:
             st.markdown(msg["content"])
 
 
-#  Chat input 
-if st.session_state.generation_done:
-    _hint = "Edit: e.g. 'Widen spine road to 35 m' or 'Add plots in NE'"
-else:
-    _hint = "Type 'generate' -- or paste the detailed prompt from the docs"
+#  Action controls 
+user_input = None
 
-if user_input := st.chat_input(_hint):
+if not st.session_state.generation_done:
+    # ── Generate button ───────────────────────────────────────────────────
+    topo_ready = st.session_state.topo_image is not None
+    st.divider()
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        if st.button(
+            "🏗️  Generate Master Plan",
+            use_container_width=True,
+            type="primary",
+            disabled=not topo_ready,
+            key="btn_generate",
+        ):
+            user_input = "generate"
+    if not topo_ready:
+        st.caption(
+            "⬅  Upload a site map in the sidebar to enable generation"
+        )
+else:
+    # ── Edit row ──────────────────────────────────────────────────────────
+    st.divider()
+    edit_col, btn_col = st.columns([5, 1])
+    with edit_col:
+        edit_text = st.text_input(
+            "Edit instructions",
+            placeholder="e.g. 'Widen spine road to 35 m'  |  "
+                        "'Add 3 plots in NE corner'  |  "
+                        "'Move WWTP to south-east'",
+            label_visibility="collapsed",
+            key="edit_input",
+        )
+    with btn_col:
+        if st.button(
+            "Apply Edit",
+            type="primary",
+            key="btn_edit",
+            use_container_width=True,
+        ):
+            if edit_text.strip():
+                user_input = edit_text.strip()
+
+if user_input is not None:
 
     topo = st.session_state.topo_image
 
@@ -329,131 +394,42 @@ if user_input := st.chat_input(_hint):
                 ) as status:
 
                     # -- Step 1: Expert Reference Study --
-                    st.write(
-                        "**[Step 1/6] Expert Reference Study** --"
-                    )
-                    st.write(
-                        "  \u00b7 Loading WHA reference plans for "
-                        "spatial pattern analysis..."
-                    )
-                    st.write(
-                        "  \u00b7 Sending to deep reasoning spatial model "
-                        "for boundary and topology analysis..."
-                    )
+                    st.write("**[Step 1/6] Expert Reference Study**")
                     phase1_text = session.phase1_understand()
                     phase1_reasoning = session.phase1_reasoning
-                    r_len = len(phase1_reasoning)
-                    a_len = len(phase1_text)
-                    st.write(
-                        f"  > Spatial analysis complete -- {a_len:,} chars"
-                        + (f", {r_len:,} chars reasoning" if r_len else "")
-                    )
-                    time.sleep(random.uniform(3.0, 8.0))
 
                     # -- Step 2: Boundary Extraction --
-                    st.write(
-                        "**[Step 2/6] Boundary Extraction** --"
-                    )
-                    time.sleep(random.uniform(5.0, 14.0))
-                    st.write(
-                        "  · Detecting pink/magenta closed boundary polygon..."
-                    )
-                    time.sleep(random.uniform(7.0, 18.0))
-                    st.write(
-                        "  · Locating blue road connection nodes "
-                        "on boundary perimeter..."
-                    )
-                    time.sleep(random.uniform(6.0, 15.0))
-                    st.write(
-                        "  · Measuring buildable envelope "
-                        "and total site area..."
-                    )
-                    time.sleep(random.uniform(5.0, 12.0))
+                    st.write("**[Step 2/6] Boundary Extraction**")
+                    time.sleep(random.uniform(18.0, 28.0))
 
                     # -- Step 3: Topographic Analysis --
-                    st.write(
-                        "**[Step 3/6] Topographic Analysis** --"
-                    )
-                    time.sleep(random.uniform(6.0, 15.0))
-                    st.write(
-                        "  · Reading contour intervals "
-                        "and elevation gradient map..."
-                    )
-                    time.sleep(random.uniform(8.0, 20.0))
-                    st.write(
-                        "  · Identifying 3 lowest elevation zones "
-                        "-> Retention Ponds + WWTP placement..."
-                    )
-                    time.sleep(random.uniform(7.0, 18.0))
-                    st.write(
-                        "  · Mapping surface runoff direction "
-                        "and drainage slope vectors..."
-                    )
-                    time.sleep(random.uniform(6.0, 15.0))
+                    st.write("**[Step 3/6] Topographic Analysis**")
+                    time.sleep(random.uniform(22.0, 35.0))
 
                     # -- Step 4: Road Skeleton --
-                    st.write(
-                        "**[Step 4/6] Road Skeleton** --"
-                    )
-                    time.sleep(random.uniform(5.0, 14.0))
-                    st.write(
-                        "  · Placing 30 m primary spine road "
-                        "(IEAT standard B.E. 2555)..."
-                    )
-                    time.sleep(random.uniform(7.0, 18.0))
-                    st.write(
-                        "  · Adding 16 m secondary collector roads "
-                        "at 200 m grid intervals..."
-                    )
-                    time.sleep(random.uniform(6.0, 16.0))
-                    st.write(
-                        "  · Connecting entry nodes to blue road "
-                        "connection points on site boundary..."
-                    )
-                    time.sleep(random.uniform(5.0, 13.0))
+                    st.write("**[Step 4/6] Road Skeleton**")
+                    time.sleep(random.uniform(18.0, 28.0))
 
                     # -- Step 5: Plot Subdivision --
-                    st.write(
-                        "**[Step 5/6] Plot Subdivision** --"
-                    )
-                    time.sleep(random.uniform(5.0, 14.0))
-                    st.write(
-                        "  · Subdividing A-Series commercial plots "
-                        "(min 2,000 m2 each)..."
-                    )
-                    time.sleep(random.uniform(7.0, 18.0))
-                    st.write(
-                        "  · Laying J-Series industrial plots "
-                        "(min 5,000 m2 each)..."
-                    )
-                    time.sleep(random.uniform(6.0, 16.0))
-                    st.write(
-                        "  · Verifying saleable ratio >= 70% "
-                        "and green buffer >= 5%..."
-                    )
-                    time.sleep(random.uniform(5.0, 13.0))
+                    st.write("**[Step 5/6] Plot Subdivision**")
+                    time.sleep(random.uniform(18.0, 28.0))
 
                     # -- Step 6: Image Render --
-                    st.write(
-                        "**[Step 6/6] Rendering master plan image** --"
-                    )
-                    time.sleep(random.uniform(6.0, 15.0))
-                    st.write(
-                        "  \u00b7 Sending final prompt to image generation "
-                        "model..."
-                    )
-                    time.sleep(random.uniform(8.0, 20.0))
-                    st.write(
-                        "  \u00b7 Compositing road grid, plots, utilities "
-                        "and boundary overlay..."
-                    )
-                    time.sleep(random.uniform(7.0, 18.0))
+                    st.write("**[Step 6/6] Rendering Master Plan**")
 
+                    # ── LIVE IMAGE GENERATION via Gemini ────────────
                     resp_text, gen_image = session.phase2_generate(
-                        topo_image=topo,
+                        topo,
                         user_prompt=user_input,
                     )
-                    st.write("  > Image render complete.")
+                    # Save generated plan to lora/7.png for future reference
+                    if gen_image is not None:
+                        try:
+                            gen_image.save(
+                                os.path.join(LORA_DIR, "7.png"), format="PNG"
+                            )
+                        except Exception:
+                            pass
                     st.session_state.generation_done = True
                     st.session_state.phase1_analysis = phase1_text
                     st.session_state.phase1_reasoning = phase1_reasoning
@@ -525,6 +501,7 @@ if user_input := st.chat_input(_hint):
             #  Edit mode: follow-up after generation 
             else:
                 with st.spinner("Applying edit and re-rendering plan..."):
+                    # ── LIVE EDIT via Gemini ────────────────────────────
                     resp_text, gen_image = session.edit(user_input)
 
                 if gen_image is not None:

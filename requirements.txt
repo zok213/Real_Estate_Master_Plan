@@ -1,32 +1,21 @@
-# WHA Auto Design AI — Python dependencies
+# WHA Auto Design AI — Python dependencies (Cloud Branch)
 # Install: pip install -r requirements.txt
 #
-# IMPORTANT — Phase 2 local inference (Qwen-Image-Edit-2511):
-#   GPU recommended (NVIDIA CUDA 12+).  CPU works but is very slow.
-#   On GPU, first run downloads ~16 GB model weights to
-#   ~/.cache/huggingface/hub (automatic, one-time).
-#
-#   For CUDA installs visit: https://pytorch.org/get-started/locally/
-#   Example CUDA 12.4:
-#     pip install torch --index-url https://download.pytorch.org/whl/cu124
-#   The torch line below installs CPU-only as a safe default.
+# This branch uses OpenRouter (Phase 1 VLM) + Google Gemini (Phase 2 image gen).
+# No local inference or GPU required — all processing runs on cloud APIs.
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.35.0
 
-# ── Phase 1 local VLM (Qwen2.5-VL via transformers) ─────────────────────────
-# qwen-vl-utils provides image/video processing helpers for Qwen2.5-VL
-qwen-vl-utils>=0.0.8
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# Loads .env for local dev; no-op in Docker/HF Spaces (env vars set natively)
+python-dotenv>=1.0.0
 
-# ── Phase 2 local inference (Qwen-Image-Edit-2511 via diffusers) ─────────────
-# PyTorch — install CUDA build separately for GPU acceleration (see above)
-torch>=2.0.0
-# HuggingFace diffusers — must be latest git for QwenImageEditPlusPipeline
-diffusers @ git+https://github.com/huggingface/diffusers
-# Required by diffusers / Qwen-Image
-transformers>=4.51.3
-accelerate>=0.30.0
-sentencepiece>=0.1.99
+# ── Phase 1 Cloud VLM (OpenRouter) ────────────────────────────────────────────
+openai>=1.30.0
+
+# ── Phase 2 Cloud Image Gen (Google Gemini) ───────────────────────────────────
+google-genai>=1.0.0
 
 # ── Image processing ──────────────────────────────────────────────────────────
 Pillow>=10.0.0
@@ -38,5 +27,3 @@ convertapi>=1.4.0
 
 # ── CAD parsing (optional — for DXF layer inspection) ────────────────────────
 ezdxf>=1.1.0
-openai>=1.30.0
-google-genai>=1.0.0

@@ -2,14 +2,13 @@
 ai_client.py — Two-phase AI pipeline (cloud: OpenRouter + Gemini).
 
 Phase 1 — Silent Reference Understanding
-  Qwen2.5-VL-72B via OpenRouter API (qwen/qwen2.5-vl-72b-instruct:free).
-  Requires OPENROUTER_API_KEY env var. Free tier, no per-token charge.
+  Qwen3-VL-235B-A22B-Thinking via OpenRouter API.
+  Advanced vision-language model with extended reasoning.
   Analyses WHA reference plans + topo examples.
   Returns concise factual site data (<= 800 words).
 
 Phase 2 — Master Plan Generation
-  Google Gemini (gemini-2.0-flash-preview-image-generation) via google-genai.
-  Requires GEMINI_API_KEY env var (get from https://aistudio.google.com).
+  Google Gemini 3.1 Flash Image Preview via google-genai.
   Takes: sys prompt + few-shot refs + topo image + Phase 1 facts.
   Returns: generated master-plan PIL image.
 
@@ -20,6 +19,8 @@ import base64
 import io
 import os
 import re
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -35,6 +36,8 @@ from config import (
     GEMINI_IMAGE_MODEL,
     OPENROUTER_API_KEY,
     OPENROUTER_BASE_URL,
+    PHASE1_ENABLED,
+    PHASE2_ENABLED,
     REFERENCE_PLAN_PATHS,
     TARGET_EXAMPLE_PATHS,
     VLM_MODEL,
@@ -58,7 +61,8 @@ _TRIVIAL = {
 }
 
 # Max longest dimension sent to the image-gen model
-_TOPO_MAX_PX = 3072
+# Gemini inline image limit is 4 MB — 1600px PNG stays well under that
+_TOPO_MAX_PX = 1600
 
 
 # ── OpenRouter client helper ──────────────────────────────────────────────────
@@ -203,7 +207,7 @@ def _preprocess_topo_for_gen(img: Image.Image) -> Image.Image:
     return Image.fromarray(result.astype(np.uint8))
 
 
-# ── VLM text helpers ──────────────────────────────────────────────────────────
+# ── VLM text helpers ──────────────────────────────────────────────────────
 
 def _strip_thinking(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
@@ -235,60 +239,37 @@ def _sanitize_reasoning(text: str) -> str:
     return text.strip()
 
 
-# ── HF image-edit response parser ────────────────────────────────────────────
+# ── Reasoning log helper ──────────────────────────────────────────────────────
 
-def _parse_hf_image_response(response) -> tuple[str, Image.Image | None]:
+_LOG_DIR = Path(__file__).parent.parent / "output" / "reasoning_logs"
+
+
+def _save_reasoning_log(reasoning: str, analysis: str) -> None:
     """
-    Extract (text, image) from a HuggingFace chat-completions response.
-
-    HF VLM image-edit endpoints may return the output image as:
-      a) base64 data-URL embedded in the text content
-      b) an image_url part in a list-type content field
-      c) raw bytes accessible via response.content (non-chat path)
+    Write Phase 1 Qwen reasoning + analysis to a timestamped .md file in
+    output/reasoning_logs/ so the full chain-of-thought can be inspected.
     """
-    text_out = ""
-    img_out: Image.Image | None = None
-
-    if not response.choices:
-        return text_out, img_out
-
-    content = response.choices[0].message.content
-
-    if isinstance(content, str):
-        # Check for embedded data-URL image (markdown or raw)
-        img_match = re.search(
-            r"data:image/[^;]+;base64,([A-Za-z0-9+/=]+)",
-            content,
-        )
-        if img_match:
-            try:
-                raw = base64.b64decode(img_match.group(1))
-                img_out = Image.open(io.BytesIO(raw)).copy()
-            except Exception:
-                pass
-        text_out = re.sub(r"!\[.*?\]\(data:image[^\)]+\)", "", content).strip()
-        if not text_out:
-            text_out = re.sub(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", "", content).strip()
-
-    elif isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict):
-                ptype = part.get("type", "")
-                if ptype == "text":
-                    text_out += part.get("text", "")
-                elif ptype == "image_url" and img_out is None:
-                    url = part.get("image_url", {}).get("url", "")
-                    if url.startswith("data:image"):
-                        try:
-                            raw = base64.b64decode(url.split(",", 1)[1])
-                            img_out = Image.open(io.BytesIO(raw)).copy()
-                        except Exception:
-                            pass
-
-    return text_out.strip(), img_out
+    try:
+        _LOG_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = _LOG_DIR / f"qwen_reasoning_{ts}.md"
+        lines = [
+            f"# Qwen Phase-1 Reasoning Log — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+            "---\n",
+            "## Chain-of-Thought / Thinking\n",
+            reasoning or "*(no reasoning captured)*",
+            "\n\n---\n",
+            "## Final Site Analysis\n",
+            analysis or "*(no analysis captured)*",
+            "\n",
+        ]
+        log_path.write_text("\n".join(lines), encoding="utf-8")
+    except Exception:
+        pass  # logging failure must never crash the main pipeline
 
 
 # ── Main session class ────────────────────────────────────────────────────────
+
 
 class WhaAISession:
     """
@@ -309,6 +290,12 @@ class WhaAISession:
         OpenRouter (free vision tier).  Returns concise factual site
         data (≤ 800 words).  Does NOT describe boundary geometry.
         """
+        if not PHASE1_ENABLED:
+            self.phase1_reasoning = ""
+            self.phase1_analysis = ""
+            self.phase1_done = True
+            return ""
+
         ref_images = _load_images(REFERENCE_PLAN_PATHS)
         tgt_images = _load_images(TARGET_EXAMPLE_PATHS)
 
@@ -322,26 +309,37 @@ class WhaAISession:
         if ref_images:
             content.append({
                 "type": "text",
-                "text": f"=== {len(ref_images)} WHA Reference Master Plans ===",
+                "text": (
+                    f"=== {len(ref_images)} WHA Reference Master Plans ==="
+                ),
             })
             for img in ref_images:
+                # JPEG at 1024px: ~150-300 KB vs 3+ MB PNG — fewer tokens
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": _pil_to_data_url(img, max_px=1280)},
+                    "image_url": {
+                        "url": _pil_to_jpeg_data_url(
+                            img, max_px=1024, quality=85
+                        )
+                    },
                 })
 
         if tgt_images:
             content.append({
                 "type": "text",
                 "text": (
-                    f"=== {len(tgt_images)} WHA Completed Master Plan Output Examples ==="
-                    "\n(Study these for visual style: colours, label format, legend, plot density)"
+                    f"=== {len(tgt_images)} WHA Completed Plan Examples ==="
+                    "\n(Study for visual style: colours, labels, legend)"
                 ),
             })
             for img in tgt_images:
                 content.append({
                     "type": "image_url",
-                    "image_url": {"url": _pil_to_data_url(img, max_px=1024)},
+                    "image_url": {
+                        "url": _pil_to_jpeg_data_url(
+                            img, max_px=1024, quality=85
+                        )
+                    },
                 })
 
         or_client = _make_openrouter_client()
@@ -368,6 +366,9 @@ class WhaAISession:
             self.phase1_analysis = "(analysis unavailable — proceeding with visual topo only)"
 
         self.phase1_done = True
+        _save_reasoning_log(
+            self.phase1_reasoning, self.phase1_analysis
+        )
         return self.phase1_analysis
 
     # ── Phase 2 ──────────────────────────────────────────────────────────────
@@ -378,17 +379,20 @@ class WhaAISession:
         user_prompt: str = "",
     ) -> tuple[str, Image.Image | None]:
         """
-        Generate a master plan via Qwen-Image-Edit-2511 on HuggingFace.
+        Generate master plan via Gemini 3.1 Flash Image Preview.
 
         Part ordering (visual-dominant — critical for boundary fidelity):
-          1. SYSTEM PROMPT           — role + hard rules
-          2. WHA style refs          — establish visual output style
-          3. Topo as BOUNDARY CANVAS — shape lock (first send)
-          4. Topo as PLANNING BASE   — content placement (second send)
-          5. GENERATION_PROMPT       — synthesis instruction
-          6. Phase 1 facts (≤600 chars) — entry point + basins only, LAST
-          7. User instruction (skip trivial words)
+          1. SYSTEM_PROMPT           — role + hard rules (as system_instruction)
+          2. Few-shot WHA style refs — establish visual output style
+          3. Topo (preprocessed)     — boundary canvas + planning base
+          4. GENERATION_PROMPT       — synthesis instruction
+          5. Phase 1 facts (full) — entry points + basins + constraints, LAST
+          6. User instruction (skip trivial words)
         """
+        if not PHASE2_ENABLED:
+            self.phase2_done = True
+            return ("Phase 2 (Gemini) is disabled.", None)
+
         preprocessed_topo = _preprocess_topo_for_gen(topo_image)
         resized_topo = _resize_for_api(preprocessed_topo, _TOPO_MAX_PX)
 
@@ -437,13 +441,13 @@ class WhaAISession:
             "  GREY stubs at boundary edge = road entry connection points.\n"
         )
 
-        # Phase 1 facts (entry + basins only, capped at 600 chars)
+        # Phase 1 facts — full analysis, no truncation
         facts_text = ""
         if self.phase1_analysis:
             facts_text = (
                 "\nSITE FACTS FROM SPATIAL ANALYSIS\n"
-                "(entry point + confirmed-inside basins only):\n"
-                + self.phase1_analysis[:600]
+                "(entry points + basins + planning constraints):\n"
+                + self.phase1_analysis
             )
 
         user_note = ""
@@ -451,10 +455,10 @@ class WhaAISession:
         if cleaned and cleaned.lower() not in _TRIVIAL:
             user_note = f"\n\nInstruction: {cleaned}"
 
+        # NOTE: SYSTEM_PROMPT is in system_instruction below — do NOT repeat
+        # it here or it will be sent twice, wasting tokens and confusing model.
         combined_prompt = (
-            SYSTEM_PROMPT
-            + "\n\n"
-            + few_shot_text
+            few_shot_text
             + "\n\n"
             + boundary_canvas_text
             + "\n\n"
@@ -465,47 +469,34 @@ class WhaAISession:
             + user_note
         )
 
-        # Build message content with few-shot images + topo
-        content: list = [{"type": "text", "text": combined_prompt}]
-
-        # Append few-shot style reference images
-        few_shot_imgs = _load_images(FEW_SHOT_PATHS)
-        for i, fs_img in enumerate(few_shot_imgs, 1):
-            content.append({
-                "type": "text",
-                "text": f"Style reference {i}/{len(few_shot_imgs)}:",
-            })
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": _pil_to_jpeg_data_url(fs_img, max_px=1280, quality=95)
-                },
-            })
-
-        # Append topo twice (boundary canvas + planning base)
-        topo_url = _pil_to_data_url(resized_topo, max_px=_TOPO_MAX_PX)
-        content.append({"type": "text", "text": "BOUNDARY CANVAS (trace this polygon):"})
-        content.append({"type": "image_url", "image_url": {"url": topo_url}})
-        content.append({"type": "text", "text": "PLANNING BASE (place content here):"})
-        content.append({"type": "image_url", "image_url": {"url": topo_url}})
-
         # ── GEMINI IMAGE GENERATION ───────────────────────────────────────
         if not GEMINI_API_KEY:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. "
-                "Get a free key at https://aistudio.google.com"
-            )
+            return ("GEMINI_API_KEY not configured.", None)
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-        # Build multimodal parts: text prompt + few-shot images + topo
-        parts: list = [genai_types.Part.from_text(text=combined_prompt)]
+        # Part ordering per Google multimodal best practices:
+        #   1.  Few-shot style-reference images (visual vocabulary)
+        #   2.  Topo boundary image (canvas + planning base)
+        #   3.  Instruction text (combined_prompt) — LAST
+        # Placing images before text gives Gemini visual context first.
+        few_shot_imgs = _load_images(FEW_SHOT_PATHS)
+        parts: list = []
+
+        # Few-shot references: cap at 1024 px, JPEG Q85 (~200-400 KB each)
         for fs_img in few_shot_imgs:
+            fs_img = _resize_for_api(fs_img, max_px=1024)
+            if fs_img.mode not in ("RGB", "L"):
+                fs_img = fs_img.convert("RGB")
             fs_buf = io.BytesIO()
-            fs_img.save(fs_buf, format="JPEG", quality=95)
+            fs_img.save(fs_buf, format="JPEG", quality=85)
             fs_buf.seek(0)
             parts.append(genai_types.Part.from_bytes(
                 data=fs_buf.read(), mime_type="image/jpeg",
             ))
+
+        # Topo image (already resized to max 1600 px)
+        if resized_topo.mode not in ("RGB", "L"):
+            resized_topo = resized_topo.convert("RGB")
         topo_buf = io.BytesIO()
         resized_topo.save(topo_buf, format="PNG")
         topo_buf.seek(0)
@@ -513,22 +504,43 @@ class WhaAISession:
             data=topo_buf.read(), mime_type="image/png",
         ))
 
-        response = gemini_client.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
-            contents=parts,
-            config=genai_types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-            ),
-        )
-        gen_image = None
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                gen_image = Image.open(io.BytesIO(part.inline_data.data))
-                break
-        if gen_image is None:
-            raise RuntimeError("Gemini returned no image in the response.")
-        self._last_generated = gen_image
-        return "", gen_image
+        # Instruction text LAST (after visual context)
+        parts.append(genai_types.Part.from_text(text=combined_prompt))
+
+        try:
+            response = gemini_client.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=genai_types.Content(
+                    role="user",
+                    parts=parts,
+                ),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    # TEXT allows Gemini rejection messages to surface
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            gen_image = None
+            resp_text = ""
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None and gen_image is None:
+                    gen_image = Image.open(
+                        io.BytesIO(part.inline_data.data)
+                    ).copy()
+                elif hasattr(part, "text") and part.text:
+                    resp_text += part.text
+            if gen_image is None:
+                reason = resp_text or "No detail returned."
+                return (
+                    f"Gemini returned no image: {reason[:300]}", None
+                )
+            self._last_generated = gen_image
+            return "", gen_image
+        except Exception as exc:
+            return (
+                f"Gemini error: {type(exc).__name__} — {str(exc)[:300]}",
+                None,
+            )
 
     # ── Edit mode ─────────────────────────────────────────────────────────────
 
@@ -537,6 +549,9 @@ class WhaAISession:
         Edit the last generated plan via Gemini image generation.
         Sends the previously generated image + edit instruction to Gemini.
         """
+        if not PHASE2_ENABLED:
+            return ("Phase 2 (Gemini) is disabled.", None)
+
         if self._last_generated is None:
             return (
                 "Please generate a master plan first before requesting edits.",
@@ -547,33 +562,57 @@ class WhaAISession:
 
         # ── GEMINI IMAGE EDIT ─────────────────────────────────────────────
         if not GEMINI_API_KEY:
-            raise RuntimeError(
-                "GEMINI_API_KEY is not set. "
-                "Get a free key at https://aistudio.google.com"
+            return (
+                "GEMINI_API_KEY not set. Get key at https://aistudio.google.com",
+                None,
             )
         gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
-        parts: list = [genai_types.Part.from_text(text=edit_prompt)]
+        # Image first, then edit instruction text
         img_buf = io.BytesIO()
-        self._last_generated.save(img_buf, format="PNG")
+        last = self._last_generated
+        if last.mode not in ("RGB", "L"):
+            last = last.convert("RGB")
+        last.save(img_buf, format="PNG")
         img_buf.seek(0)
-        parts.append(genai_types.Part.from_bytes(
-            data=img_buf.read(), mime_type="image/png",
-        ))
-
-        response = gemini_client.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
-            contents=parts,
-            config=genai_types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
+        parts: list = [
+            genai_types.Part.from_bytes(
+                data=img_buf.read(), mime_type="image/png",
             ),
-        )
-        gen_image = None
-        for part in response.candidates[0].content.parts:
-            if part.inline_data is not None:
-                gen_image = Image.open(io.BytesIO(part.inline_data.data))
-                break
-        if gen_image is None:
-            raise RuntimeError("Gemini returned no image in the response.")
-        self._last_generated = gen_image
-        return "", gen_image
+            genai_types.Part.from_text(text=edit_prompt),
+        ]
+
+        try:
+            response = gemini_client.models.generate_content(
+                model=GEMINI_IMAGE_MODEL,
+                contents=genai_types.Content(
+                    role="user",
+                    parts=parts,
+                ),
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    response_modalities=["IMAGE", "TEXT"],
+                ),
+            )
+            gen_image = None
+            resp_text = ""
+            for part in response.candidates[0].content.parts:
+                if part.inline_data is not None and gen_image is None:
+                    gen_image = Image.open(
+                        io.BytesIO(part.inline_data.data)
+                    ).copy()
+                elif hasattr(part, "text") and part.text:
+                    resp_text += part.text
+            if gen_image is None:
+                reason = resp_text or "No image returned."
+                return (
+                    f"Gemini edit did not generate an image: {reason}",
+                    None,
+                )
+            self._last_generated = gen_image
+            return resp_text, gen_image
+        except Exception as exc:
+            return (
+                f"Gemini edit error: {type(exc).__name__} — {str(exc)[:300]}",
+                None,
+            )
