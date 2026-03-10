@@ -121,6 +121,6 @@ aspose_*/
 *.resolved
 *.resolved.*
 
-# Local training data
-lora/
+# Lora / few-shot reference images (include all except large duplicates)
+lora/2 copy.png
 
