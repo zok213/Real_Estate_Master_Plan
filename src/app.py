@@ -71,12 +71,16 @@ def _clear_topo_cache() -> None:
 
 
 #  Page config 
-st.set_page_config(
-    page_title="WHA Auto Design AI",
-    page_icon="\U0001F3D7",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+# set_page_config is called in streamlit_app.py entry point (only once).
+# Guard here so `src/app.py` can also be run directly with `streamlit run`.
+if "_page_config_done" not in st.session_state:
+    st.set_page_config(
+        page_title="WHA Auto Design AI",
+        page_icon="\U0001F3D7",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.session_state["_page_config_done"] = True
 
 
 #  Session state 

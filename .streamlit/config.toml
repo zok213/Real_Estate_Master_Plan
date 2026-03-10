@@ -1,13 +1,8 @@
 [server]
-# HF Spaces requires port 7860
-port = 7860
-address = "0.0.0.0"
 headless = true
 # Disable file watcher in production (saves CPU, no live-reload needed)
 fileWatcherType = "none"
-# CORS disabled — HF Spaces proxies traffic through its own layer
 enableCORS = false
-enableXsrfProtection = false
 
 [browser]
 gatherUsageStats = false
