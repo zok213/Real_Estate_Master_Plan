@@ -12,9 +12,6 @@ import tempfile
 import convertapi
 from config import CONVERTAPI_SECRET
 
-# Configure once at import time.
-convertapi.api_credentials = CONVERTAPI_SECRET
-
 
 def convert_dwg_to_png(dwg_bytes: bytes) -> str | None:
     """
@@ -29,6 +26,9 @@ def convert_dwg_to_png(dwg_bytes: bytes) -> str | None:
     Returns:
         Absolute path to the generated PNG, or None on error.
     """
+    if not CONVERTAPI_SECRET:
+        return None
+    convertapi.api_credentials = CONVERTAPI_SECRET
     # Write DWG bytes to a temp file so ConvertAPI can read it.
     with tempfile.NamedTemporaryFile(
         delete=False, suffix=".dwg"
