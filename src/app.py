@@ -27,11 +27,40 @@ if _SRC not in sys.path:
 
 import streamlit as st
 from PIL import Image
+import extra_streamlit_components as stx
 
 from config import TOPO_CACHE_PATH, LORA_DIR
 
-# ── Demo mode: bypass Gemini, show lora/6.png as the plan output ──────────────
-_DEMO_IMAGE_PATH = os.path.join(LORA_DIR, "6.png")
+# ── Prompt quota ──────────────────────────────────────────────────────────────
+MAX_PROMPTS = 5
+_COOKIE_KEY = "wha_prompt_count"
+_COOKIE_DAYS = 1   # quota resets after 1 day
+
+# CookieManager must be created once at module level.
+_cookie_manager = stx.CookieManager(key="_cm")
+
+
+def _get_prompt_count() -> int:
+    """Read how many prompts this browser has used today."""
+    val = _cookie_manager.get(_COOKIE_KEY)
+    try:
+        return int(val) if val is not None else 0
+    except (ValueError, TypeError):
+        return 0
+
+
+def _increment_prompt_count() -> int:
+    """Increment + persist prompt count cookie. Returns new count."""
+    new_count = _get_prompt_count() + 1
+    _cookie_manager.set(
+        _COOKIE_KEY,
+        str(new_count),
+        expires_at=__import__('datetime').datetime.now() +
+        __import__('datetime').timedelta(days=_COOKIE_DAYS),
+        key=f"_cm_set_{new_count}",
+    )
+    return new_count
+
 from dwg_utils import convert_dwg_to_png
 from ai_client import WhaAISession, DAILY_QUOTA_ERR
 
@@ -178,6 +207,17 @@ def _friendly_error(exc: Exception) -> str:
 with st.sidebar:
     st.title("WHA Auto Design AI")
     st.caption("Industrial Estate Master Plan Generator")
+    st.divider()
+
+    # ── Prompt quota indicator ──────────────────────────────────────────────
+    _used_now = _get_prompt_count()
+    _remaining = max(0, MAX_PROMPTS - _used_now)
+    if _remaining == 0:
+        st.error(f"🔒 Prompt limit: {_used_now}/{MAX_PROMPTS} used — resets in 24 h")
+    elif _remaining <= 2:
+        st.warning(f"⚠️ Prompts remaining: {_remaining}/{MAX_PROMPTS}")
+    else:
+        st.info(f"✅ Prompts remaining: {_remaining}/{MAX_PROMPTS}")
     st.divider()
 
     st.subheader("Upload Site Map")
@@ -358,6 +398,16 @@ else:
 
 if user_input is not None:
 
+    # ── Quota check ───────────────────────────────────────────────────────
+    _used = _get_prompt_count()
+    if _used >= MAX_PROMPTS:
+        st.error(
+            f"🔒 **Prompt limit reached** ({MAX_PROMPTS}/{MAX_PROMPTS} used).\n\n"
+            "You have used all your free generations for today. "
+            "The quota resets in 24 hours."
+        )
+        st.stop()
+
     topo = st.session_state.topo_image
 
     # Record user message
@@ -443,6 +493,8 @@ if user_input is not None:
                         state="complete",
                         expanded=False,
                     )
+                # Count this successful generation
+                _increment_prompt_count()
 
                 # Outside st.status -- expanders are safe here
                 if phase1_reasoning:
@@ -507,7 +559,8 @@ if user_input is not None:
                 with st.spinner("Applying edit and re-rendering plan..."):
                     # ── LIVE EDIT via Gemini ────────────────────────────
                     resp_text, gen_image = session.edit(user_input)
-
+                # Count this successful edit
+                _increment_prompt_count()
                 if gen_image is not None:
                     with st.expander(
                         "Master Plan Image  (click to hide)",

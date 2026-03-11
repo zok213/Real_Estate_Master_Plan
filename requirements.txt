@@ -6,6 +6,7 @@
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.35.0
+extra-streamlit-components>=0.1.60
 
 # ── Environment / secrets ─────────────────────────────────────────────────────
 # Loads .env for local dev; no-op in Docker/HF Spaces (env vars set natively)
